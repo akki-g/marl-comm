@@ -8,9 +8,9 @@ from tensordict import TensorDictBase
 
 from benchmarl.models.common import Model
 
-from src.commstudy.communication.identity import IdentityComm
-from src.commstudy.utils.imports import import_from_path
-from src.commstudy.communication.base import CommContext, CommModule
+from commstudy.communication.base import CommContext, CommModule
+from commstudy.utils.imports import import_from_path
+
 
 class CommPolicyModel(Model):
     """
@@ -267,4 +267,3 @@ class CommPolicyModel(Model):
         )
 
         return tensordict
-

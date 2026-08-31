@@ -1,0 +1,32 @@
+params:
+  share_param_critic: true
+
+  clip_epsilon: 0.2
+  entropy_coef: 0.0
+  critic_coef: 1.0
+
+  loss_critic_type: l2
+
+  lmbda: 0.9
+
+  scale_mapping: biased_softplus_1.0
+  use_tanh_normal: true
+
+  minibatch_advantage: false
+
+experiment:
+  gamma: 0.99
+  lr: 0.00005
+
+  prefer_continuous_actions: true
+
+  max_n_iters: null
+  max_n_frames: 120000
+
+  on_policy_collected_frames_per_batch: 6000
+  on_policy_n_envs_per_worker: 10
+
+  on_policy_n_minibatch_iters: 10
+  on_policy_minibatch_size: 400
+
+  evaluation_interval: 12000

@@ -1,0 +1,4 @@
+params:
+  max_steps: 100
+  n_agents: 3
+  obs_agents: true

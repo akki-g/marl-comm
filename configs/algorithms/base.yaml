@@ -1,0 +1,47 @@
+algorithm: mappo
+task: vmas_simple_spread
+model: benchmarl_mlp
+
+seed: 0
+
+experiment:
+  sampling_device: cpu
+  train_device: cpu
+  buffer_device: cpu
+
+  share_policy_params: true
+  collect_with_grad: false
+  parallel_collection: false
+
+  evaluation: true
+  render: false
+  evaluation_episodes: 5
+  evaluation_deterministic_actions: true
+  evaluation_static: false
+
+  loggers:
+    - csv
+
+  project_name: commstudy
+  create_json: true
+
+  checkpoint_interval: 0
+  checkpoint_at_end: false
+
+critic_model:
+  model_type: benchmarl_mlp
+
+  params:
+    num_cells:
+      - 128
+      - 128
+
+    layer_class_path: torch.nn.Linear
+    activation_class_path: torch.nn.Tanh
+
+    activation_kwargs: null
+
+    norm_class_path: null
+    norm_kwargs: null
+
+    num_feature_dims: 1

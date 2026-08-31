@@ -1,0 +1,13 @@
+model_type: communication
+
+params:
+  hidden_dim: 128
+  num_encoder_layers: 2
+
+  activation_class_path: torch.nn.Tanh
+
+  comm_class_path: commstudy.communication.identity.IdentityComm
+
+  comm_kwargs: {}
+
+  comm_context_keys: {}

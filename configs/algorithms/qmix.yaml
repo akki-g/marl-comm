@@ -1,0 +1,26 @@
+params:
+  mixing_embed_dim: 32
+  delay_value: true
+  loss_function: l2
+
+experiment:
+  gamma: 0.99
+  lr: 0.00005
+
+  prefer_continuous_actions: false
+
+  max_n_iters: null
+  max_n_frames: 120000
+
+  off_policy_collected_frames_per_batch: 6000
+  off_policy_n_envs_per_worker: 10
+
+  off_policy_n_optimizer_steps: 100
+  off_policy_train_batch_size: 128
+
+  off_policy_memory_size: 100000
+  off_policy_init_random_frames: 6000
+
+  off_policy_use_prioritized_replay_buffer: false
+
+  evaluation_interval: 12000

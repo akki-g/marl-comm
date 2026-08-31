@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from benchmarl.models.common import ModelConfig
 
-from src.commstudy.models.model import CommPolicyModel
+from commstudy.models.model import CommPolicyModel
 
 
 @dataclass
