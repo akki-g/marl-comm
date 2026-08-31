@@ -318,11 +318,27 @@ def render_report(suite_dir: Path, results_dir: Path) -> str:
             align="ll",
         )
     )
-    if len(provenance["commits"]) > 1 or len(provenance["devices"]) > 1:
+    # Mixing GPU models is the same hazard as mixing CPU and CUDA: kernel
+    # selection and reduction order differ between architectures, so a study
+    # split across V100 and H100 nodes is not a clean comparison.
+    if (
+        len(provenance["commits"]) > 1
+        or len(provenance["devices"]) > 1
+        or len(provenance["gpus"]) > 1
+    ):
+        mixed = []
+        if len(provenance["commits"]) > 1:
+            mixed.append(f"commits ({', '.join(provenance['commits'])})")
+        if len(provenance["devices"]) > 1:
+            mixed.append(f"devices ({', '.join(provenance['devices'])})")
+        if len(provenance["gpus"]) > 1:
+            mixed.append(f"GPU models ({', '.join(provenance['gpus'])})")
         lines.append(
-            "> Rows in this suite did not all execute under one commit or device. "
-            "Numerics differ across devices, so cross-row comparison is only valid "
-            "within a single device."
+            f"> **Rows in this suite did not all execute under one environment.** "
+            f"Mixed {'; '.join(mixed)}. Numerics differ across commits, devices, and "
+            "GPU architectures, so cross-row comparison is only valid within a "
+            "single one. Pin the GPU model when submitting, e.g. "
+            "`sbatch --gres=gpu:h100:1 ...`."
         )
         lines.append("")
 

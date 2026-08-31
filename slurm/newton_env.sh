@@ -86,7 +86,7 @@ if ! python -c 'import torch, benchmarl, torchrl, tensordict, vmas' 2>/dev/null;
     echo "  cd $COMMSTUDY_REPO"
     echo "  module load $COMMSTUDY_PYTHON_MODULE $COMMSTUDY_CUDA_MODULE"
     echo "  source $COMMSTUDY_VENV/bin/activate"
-    echo "  pip install --index-url https://download.pytorch.org/whl/cu124 'torch>=2.7'"
+    echo "  pip install --index-url https://download.pytorch.org/whl/cu126 'torch>=2.7'"
     echo "  pip install -e '.[dev,analysis]'"
     echo
     echo "Then resubmit:  sbatch slurm/01_setup.sbatch"

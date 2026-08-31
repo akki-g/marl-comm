@@ -138,10 +138,23 @@ The module it settles on is written to `slurm/.resolved_env`, which the training
 jobs then source, so every job uses the interpreter setup actually verified
 rather than re-guessing.
 
-**`No module named 'torch'`, or `cannot reach pypi.org`.** Compute nodes here
-have no outbound internet, so `pip` cannot run inside a job. `01_setup.sbatch`
-now detects this before building anything and stops with instructions rather
-than leaving a half-built venv behind.
+**`No matching distribution found for torch>=2.7`.** The `cu124` index does not
+carry PyTorch 2.7 or newer — 2.7 dropped CUDA 12.4 and ships `cu118`, `cu126`,
+and `cu128` only. Use **cu126**, which is now the default.
+
+cu126 is chosen deliberately over cu128: its wheels cover both architectures on
+this cluster, Volta `sm_70` (V100) and Hopper `sm_90` (H100), so a job is safe
+wherever it lands. cu128 targets newer architectures, so pair it with an H100
+pin or a V100 allocation may fail at runtime with `no kernel image is available
+for execution on the device`.
+
+The wheel bundles its own CUDA runtime, so the index need not match the loaded
+`cuda` module; only the node driver has to be new enough.
+
+**`No module named 'torch'`, or `cannot reach pypi.org`.** If compute nodes have
+no outbound internet, `pip` cannot run inside a job. `01_setup.sbatch` detects
+this before building anything and stops with instructions rather than leaving a
+half-built venv behind.
 
 Install from a **login node**, then resubmit `01`. It detects the completed
 environment, skips the install, and just builds the manifests:
@@ -152,7 +165,7 @@ module load python/python-3.11.4-gcc-12.2.0 cuda/cuda-12.4.0
 python3 -m venv .venv-newton                      # note: python3, not python
 source .venv-newton/bin/activate
 pip install --upgrade pip wheel setuptools
-pip install --index-url https://download.pytorch.org/whl/cu124 'torch>=2.7'
+pip install --index-url https://download.pytorch.org/whl/cu126 'torch>=2.7'
 pip install -e '.[dev,analysis]'
 ```
 
@@ -174,10 +187,50 @@ succeeded yet. Those jobs exit immediately without touching `runs/`, so a failed
 setup costs nothing and creates no partial results.
 
 Other defaults baked into the scripts: partition `normal`, `--gres=gpu:1`,
-`cuda/cuda-12.4.0`. Check partitions and time limits with:
+`cuda/cuda-12.4.0`.
+
+## Choosing V100 vs H100
+
+Newton mixes both: roughly 42 V100s (21 nodes, dual V100 16/32 GB) and 90 H100s
+(29 nodes with dual H100 80 GB, plus 4 nodes with eight each). A bare
+`--gres=gpu:1` takes whatever is free, which for this study means rows may land
+on different architectures.
+
+**That matters scientifically.** Kernel selection and floating-point reduction
+order differ between Volta and Hopper, so a study split across both is not a
+clean comparison — the same hazard as mixing CPU and CUDA. `REPORT.md` now
+detects and warns about it, but pinning is better than discovering it later.
+
+The scripts do not hardcode a GPU type, because an unconfigured GRES type makes
+every submission fail outright. Find the real string first:
 
 ```bash
-sinfo -o "%P %l %G %D"
+sbatch slurm/00_probe.sbatch
+cat slurm/logs/probe_<jobid>.out
+```
+
+The probe prints the configured GRES types, the node features, and the GPU model
+per node. Then pin on the command line — sbatch flags override the `#SBATCH`
+headers, so no file editing is needed:
+
+```bash
+# If the probe shows a GRES type such as gpu:h100
+sbatch --gres=gpu:h100:1 slurm/02_main_comparison.sbatch
+sbatch --gres=gpu:h100:1 slurm/03_ablations.sbatch
+
+# If it instead shows a node feature such as h100
+sbatch --constraint=h100 slurm/02_main_comparison.sbatch
+```
+
+H100 nodes are both faster and far more numerous here, so pinning to them
+usually improves queue time as well as consistency. Use the same pin for every
+suite in the study, including `04_analyze.sbatch`, so the saliency rollouts run
+on the architecture the policies were trained on.
+
+Check partitions, time limits, GRES, and features directly with:
+
+```bash
+sinfo -o "%20P %10l %24G %20f %6D %t"
 ```
 
 ## Monitoring

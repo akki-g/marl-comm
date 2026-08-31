@@ -33,7 +33,18 @@ mkdir -p slurm/logs
 
 VENV="${COMMSTUDY_VENV:-$REPO_DIR/.venv-newton}"
 CUDA_MODULE="${COMMSTUDY_CUDA_MODULE:-cuda/cuda-12.4.0}"
-TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu124}"
+# cu126, not cu124: PyTorch 2.7 DROPPED the cu124 index, so `torch>=2.7` has no
+# matching distribution there. 2.7+ ships cu118, cu126, and cu128 only.
+#
+# cu126 is the default because its wheels cover both architectures on this
+# cluster -- Volta sm_70 (V100) and Hopper sm_90 (H100) -- so a job is safe
+# wherever it lands. cu128 targets newer architectures; if you use it, pin the
+# job to H100 nodes or a V100 allocation may fail at runtime with
+# "no kernel image is available for execution on the device".
+#
+# The pip wheel bundles its own CUDA runtime, so this need not match the loaded
+# cuda module; only the node's driver has to be new enough.
+TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu126}"
 
 # Ordered best-first. Override with COMMSTUDY_PYTHON_MODULE to force one.
 if [[ -n "${COMMSTUDY_PYTHON_MODULE:-}" ]]; then

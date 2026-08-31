@@ -28,8 +28,30 @@ echo "job ${SLURM_JOB_ID:-none}  submit_dir ${SLURM_SUBMIT_DIR:-unset}"
 banner "gpu"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv 2>&1 || echo "nvidia-smi unavailable"
 
-banner "partitions"
-sinfo -o "%20P %10l %15G %6D %t" 2>&1 | head -30
+banner "partitions, GRES, and node features"
+# The GRES and AVAIL_FEATURES columns are what you need to target a specific
+# GPU model. Whatever appears there is the exact string to pass to sbatch.
+sinfo -o "%20P %10l %24G %20f %6D %t" 2>&1 | head -40
+
+banner "how to request a specific GPU model"
+# Newton mixes V100 (sm_70) and H100 (sm_90) nodes. Slurm sites expose the
+# choice either as a GRES type or as a node feature; report both so the
+# correct one is obvious rather than guessed.
+echo "GRES types configured on this cluster:"
+sinfo -h -o "%G" 2>/dev/null | tr ',' '\n' | sed 's/(.*)//' | sort -u | sed 's/^/  /'
+echo
+echo "Node features (usable with --constraint):"
+sinfo -h -o "%f" 2>/dev/null | tr ',' '\n' | sort -u | grep -v '^(null)$' | sed 's/^/  /'
+echo
+echo "GPU models actually present, by node:"
+scontrol show nodes 2>/dev/null \
+  | awk '/NodeName=/{n=$1} /Gres=/{print "  " n "  " $0}' \
+  | grep -i gpu | head -20
+echo
+echo "If a type appears above (e.g. gpu:h100), request it with:"
+echo "  sbatch --gres=gpu:h100:1 slurm/02_main_comparison.sbatch"
+echo "If instead a feature appears (e.g. h100), use:"
+echo "  sbatch --constraint=h100 slurm/02_main_comparison.sbatch"
 
 banner "system interpreters (these usually LACK venv)"
 for candidate in python python3 python3.11 python3.12; do

@@ -17,9 +17,21 @@ def _write_csv(path, rows, fieldnames=None):
         writer.writerows(rows)
 
 
-def _run(suite_dir, run_id, *, status="completed", dirty=False, device="cpu", commit="abc123"):
+def _run(
+    suite_dir,
+    run_id,
+    *,
+    status="completed",
+    dirty=False,
+    device="cpu",
+    commit="abc123",
+    gpu=None,
+):
     run_dir = suite_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    runtime = {"train_device": device}
+    if gpu is not None:
+        runtime["cuda_device_name"] = gpu
     (run_dir / "metadata.json").write_text(
         json.dumps(
             {
@@ -32,7 +44,7 @@ def _run(suite_dir, run_id, *, status="completed", dirty=False, device="cpu", co
                 "seed": 0,
                 "frames": 600000,
                 "git": {"commit_sha": commit, "dirty": dirty},
-                "runtime": {"train_device": device},
+                "runtime": runtime,
                 "versions": {"torch": "2.13.0", "benchmarl": "1.5.2"},
             }
         ),
@@ -206,7 +218,41 @@ def test_report_records_dirty_tree_and_device(suite, tmp_path):
     assert "dirty" in report
     assert "cuda" in report
     # Two commits and two devices in one suite is a comparability hazard.
-    assert "did not all execute under one commit or device" in report
+    assert "did not all execute under one environment" in report
+
+
+def test_report_warns_when_a_suite_mixes_gpu_models(suite):
+    """V100 and H100 rows are not directly comparable; say so explicitly."""
+
+    suite_dir, results_dir = suite
+    _run(suite_dir, "v100_run", device="cuda", gpu="Tesla V100-PCIE-32GB")
+    _run(suite_dir, "h100_run", device="cuda", gpu="NVIDIA H100 PCIe")
+
+    report = render_report(suite_dir, results_dir)
+
+    assert "GPU models" in report
+    assert "Tesla V100-PCIE-32GB" in report
+    assert "NVIDIA H100 PCIe" in report
+    assert "--gres=gpu:h100:1" in report
+
+
+def test_report_is_quiet_when_one_gpu_model_is_used_throughout(tmp_path):
+    suite_dir = tmp_path / "runs" / "uniform"
+    results_dir = tmp_path / "results" / "uniform"
+    suite_dir.mkdir(parents=True)
+    for name in ("a", "b"):
+        _run(suite_dir, name, device="cuda", gpu="NVIDIA H100 PCIe")
+    _write_csv(
+        results_dir / "uniform_per_run.csv",
+        [{"run_id": "a", "status": "completed", "model": "comm_graph", "seed": "0",
+          "ablation": "main", "ablation_value": "", "mean_final_return": "-500"}],
+    )
+    _write_csv(results_dir / "uniform_summary.csv", [])
+
+    report = render_report(suite_dir, results_dir)
+
+    assert "did not all execute under one environment" not in report
+    assert "NVIDIA H100 PCIe" in report
 
 
 def test_report_notes_absent_saliency_instead_of_reporting_zero(tmp_path):
