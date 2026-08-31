@@ -15,4 +15,9 @@ outputs/
 /runs/
 /results/
 
+# Scheduler stdout/stderr. The sbatch scripts themselves are tracked.
+/slurm/logs/
+# Machine-specific module/venv names resolved by 01_setup.sbatch.
+/slurm/.resolved_env
+
 

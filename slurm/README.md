@@ -6,6 +6,7 @@ to execute — the only command you ever run is `sbatch`.
 ```bash
 cd ~/marl-comm
 
+sbatch slurm/00_probe.sbatch            # optional: report what this cluster has
 sbatch slurm/01_setup.sbatch            # once: venv, CUDA check, manifests
 sbatch slurm/02_main_comparison.sbatch  # 30 rows  — MLP + 5 comm methods x 5 seeds
 sbatch slurm/03_ablations.sbatch        # 201 rows — full ablation study
@@ -99,35 +100,65 @@ and final returns clustered near −430..−560. If CUDA reproduces that, the
 protocol transfers; if not, stop and diagnose before interpreting communication
 rows.
 
-## Before the first submission
+## Troubleshooting setup
 
-Verify the module names and partitions on your account — these are the values
-most likely to have drifted from the published docs:
-
-```bash
-module avail python
-module avail cuda
-sinfo -o "%P %l %G %D"     # partitions, time limits, GRES, node counts
-```
-
-Defaults baked into the scripts: partition `normal`, `--gres=gpu:1`,
-`python/python-3.11.4-gcc-12.2.0`, `cuda/cuda-12.4.0`. Override without editing
-files:
+`00_probe.sbatch` is read-only and prints the ground truth for your account:
+available python/cuda/anaconda modules, the GPU, the partitions, and — most
+usefully — which candidate python module actually yields a working interpreter.
+Run it whenever setup fails:
 
 ```bash
-sbatch --export=ALL,COMMSTUDY_CUDA_MODULE=cuda/cuda-12.6.0 slurm/01_setup.sbatch
+sbatch slurm/00_probe.sbatch
+cat slurm/logs/probe_<jobid>.out
 ```
 
-If `01_setup.sbatch` fails with network or DNS errors, Newton's compute nodes
-have no outbound internet. Run the install on a **login node** instead, then
-resubmit `01` to do the manifest half:
+**`No module named venv`.** The Spack-built modules here provide `python3` but
+not always `python`, so a bare `python` silently falls through to
+`/usr/bin/python`, which has no `venv`. `01_setup.sbatch` now resolves the
+interpreter explicitly and rejects anything under `/usr/bin` or `/bin`, anything
+below 3.11, and anything whose `venv` module does not actually run. It tries
+these in order and reports which it used:
+
+```text
+python/python-3.11.4-gcc-12.2.0
+python/python-3.11.4-oneapi-2023.1.0
+python-3.11.4-gcc-12.2.0
+anaconda/anaconda-2024.10
+anaconda/anaconda-2023.09
+```
+
+Force a specific one without editing files:
+
+```bash
+sbatch --export=ALL,COMMSTUDY_PYTHON_MODULE=anaconda/anaconda-2024.10 \
+  slurm/01_setup.sbatch
+```
+
+The module it settles on is written to `slurm/.resolved_env`, which the training
+jobs then source, so every job uses the interpreter setup actually verified
+rather than re-guessing.
+
+**Network or DNS errors during `pip install`.** Compute nodes may have no
+outbound internet. Install on a **login node**, then resubmit `01` to do the
+manifest half (it skips the venv if one already exists):
 
 ```bash
 module load python/python-3.11.4-gcc-12.2.0 cuda/cuda-12.4.0
-python -m venv ~/marl-comm/.venv-newton
+python3 -m venv ~/marl-comm/.venv-newton          # note: python3, not python
 source ~/marl-comm/.venv-newton/bin/activate
 pip install --index-url https://download.pytorch.org/whl/cu124 'torch>=2.7'
 pip install -e '.[dev,analysis]'
+```
+
+**`virtualenv not found`** from `02`/`03`/`04` simply means `01` has not
+succeeded yet. Those jobs exit immediately without touching `runs/`, so a failed
+setup costs nothing and creates no partial results.
+
+Other defaults baked into the scripts: partition `normal`, `--gres=gpu:1`,
+`cuda/cuda-12.4.0`. Check partitions and time limits with:
+
+```bash
+sinfo -o "%P %l %G %D"
 ```
 
 ## Monitoring

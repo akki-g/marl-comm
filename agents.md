@@ -1053,8 +1053,8 @@ shell scripts, and `git diff --check` pass.
   failing to learn and the ablation budget is justified.
 - All eight V2 suites expand cleanly to **231 rows** (main 30, message_dim 48,
   dropout 48, rounds 18, heads 24, graph topology 9, sender budget 36, self
-  communication 18), verified via `bash slurm/submit.sh --all --dry-run`
-  (60 array tasks at chunk 4).
+  communication 18), verified by `src/tests/test_slurm_scripts.py`, which pins
+  the sbatch array ranges to the expanded row counts.
 - Priority order if compute must be cut short: message_dim, dropout, rounds,
   graph topology (the four required), then sender budget, then heads and self
   communication.

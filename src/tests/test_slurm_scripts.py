@@ -33,6 +33,7 @@ ABLATION_SUITES = (
 )
 
 SCRIPTS = (
+    "00_probe.sbatch",
     "01_setup.sbatch",
     "02_main_comparison.sbatch",
     "03_ablations.sbatch",
@@ -130,6 +131,67 @@ def test_manifest_paths_agree_between_setup_and_array_scripts():
 
     assert "runs/_manifests/ablations.csv" in setup
     assert "runs/_manifests/ablations.csv" in ablations
+
+
+def test_setup_never_relies_on_a_bare_python_before_activation():
+    """Regression: Spack modules provide `python3`, not always `python`.
+
+    Calling `python` before the venv is activated silently falls through to
+    /usr/bin/python, which on this cluster has no `venv` module. The setup
+    script must resolve an interpreter explicitly and verify it.
+    """
+
+    setup = (SLURM / "01_setup.sbatch").read_text(encoding="utf-8")
+
+    # It must create the venv through a resolved, verified interpreter.
+    assert '"$PYTHON_BIN" -m venv' in setup
+    assert "python -m venv" not in setup
+
+    # Resolution must reject system interpreters and prove venv actually works.
+    assert "/usr/bin/*|/bin/*" in setup
+    assert "-m venv --help" in setup
+    assert "version_info[:2] >= (3,11)" in setup
+
+
+def test_setup_tries_multiple_module_names_and_points_at_the_probe():
+    setup = (SLURM / "01_setup.sbatch").read_text(encoding="utf-8")
+
+    assert "PYTHON_MODULE_CANDIDATES" in setup
+    assert "anaconda" in setup, "anaconda is the documented fallback on Newton"
+    assert "COMMSTUDY_PYTHON_MODULE" in setup
+    assert "00_probe.sbatch" in setup, "failure path must name the diagnostic job"
+
+
+def test_setup_records_the_resolved_environment_for_training_jobs():
+    """Training jobs must reuse the interpreter setup verified, not re-guess."""
+
+    setup = (SLURM / "01_setup.sbatch").read_text(encoding="utf-8")
+    env = (SLURM / "newton_env.sh").read_text(encoding="utf-8")
+
+    assert "slurm/.resolved_env" in setup
+    assert ".resolved_env" in env
+
+
+def test_env_error_message_points_at_a_script_that_exists():
+    """A guard is only useful if the command it recommends is real."""
+
+    env = (SLURM / "newton_env.sh").read_text(encoding="utf-8")
+
+    assert "01_setup.sbatch" in env
+    for name in ("bootstrap_newton.sh", "submit.sh", "run_suite.sbatch"):
+        assert name not in env, f"stale reference to deleted {name}"
+
+
+def test_probe_makes_no_changes():
+    """The diagnostic must be safe to run at any time, including mid-study."""
+
+    probe = (SLURM / "00_probe.sbatch").read_text(encoding="utf-8")
+
+    for destructive in ("pip install", "scripts/sweep.py", "rm -", "mkdir "):
+        assert destructive not in probe, f"probe must not run: {destructive}"
+    # `venv --help` is a capability check; actually building one is not.
+    assert "-m venv --help" in probe
+    assert '-m venv "' not in probe
 
 
 def test_scripts_are_sourced_not_executed():

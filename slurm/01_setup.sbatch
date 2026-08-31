@@ -16,10 +16,14 @@
 # Builds the virtualenv, verifies CUDA is visible from a compute node, and
 # writes every run manifest so the training arrays never race to create them.
 #
-# IF THIS FAILS WITH NETWORK/DNS ERRORS: Newton compute nodes may have no
-# outbound internet. In that case run the pip commands on the LOGIN node
-# instead -- they are printed in the log and repeated in slurm/README.md --
-# then submit this script again to do the manifest half.
+# Interpreter selection is deliberately defensive. Spack-built modules on this
+# cluster provide `python3` but not always `python`, so calling `python` can
+# silently fall through to /usr/bin/python -- which has no `venv` module. Each
+# candidate module is therefore loaded and then VERIFIED to yield a non-system
+# interpreter >= 3.11 that can actually run `venv`.
+#
+# If every candidate fails, run `sbatch slurm/00_probe.sbatch` and read
+# slurm/logs/probe_<jobid>.out for the ground truth on your account.
 
 set -euo pipefail
 
@@ -28,35 +32,97 @@ cd "$REPO_DIR"
 mkdir -p slurm/logs
 
 VENV="${COMMSTUDY_VENV:-$REPO_DIR/.venv-newton}"
-PYTHON_MODULE="${COMMSTUDY_PYTHON_MODULE:-python/python-3.11.4-gcc-12.2.0}"
 CUDA_MODULE="${COMMSTUDY_CUDA_MODULE:-cuda/cuda-12.4.0}"
 TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu124}"
+
+# Ordered best-first. Override with COMMSTUDY_PYTHON_MODULE to force one.
+if [[ -n "${COMMSTUDY_PYTHON_MODULE:-}" ]]; then
+  PYTHON_MODULE_CANDIDATES=("$COMMSTUDY_PYTHON_MODULE")
+else
+  PYTHON_MODULE_CANDIDATES=(
+    "python/python-3.11.4-gcc-12.2.0"
+    "python/python-3.11.4-oneapi-2023.1.0"
+    "python-3.11.4-gcc-12.2.0"
+    "anaconda/anaconda-2024.10"
+    "anaconda/anaconda-2023.09"
+  )
+fi
 
 echo "=============================================================="
 echo "repo   $REPO_DIR"
 echo "venv   $VENV"
-echo "python $PYTHON_MODULE"
 echo "cuda   $CUDA_MODULE"
 echo "=============================================================="
 
-module purge
-module load "$PYTHON_MODULE"
-module load "$CUDA_MODULE"
+# Return a usable interpreter path on stdout, or fail.
+# "Usable" = not the system python, >= 3.11, and `-m venv` actually works.
+resolve_python() {
+  local candidate path
+  for candidate in python3.11 python3 python; do
+    path="$(command -v "$candidate" 2>/dev/null)" || continue
+    case "$path" in /usr/bin/*|/bin/*) continue ;; esac
+    if "$path" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3,11) else 1)' 2>/dev/null \
+       && "$path" -m venv --help >/dev/null 2>&1; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PYTHON_BIN=""
+PYTHON_MODULE=""
+for candidate_module in "${PYTHON_MODULE_CANDIDATES[@]}"; do
+  module purge >/dev/null 2>&1 || true
+  if ! module load "$candidate_module" >/dev/null 2>&1; then
+    echo "[setup] module not found: $candidate_module"
+    continue
+  fi
+  module load "$CUDA_MODULE" >/dev/null 2>&1 || true
+  if PYTHON_BIN="$(resolve_python)"; then
+    PYTHON_MODULE="$candidate_module"
+    echo "[setup] using module  $PYTHON_MODULE"
+    echo "[setup] interpreter   $PYTHON_BIN ($("$PYTHON_BIN" -V 2>&1))"
+    break
+  fi
+  echo "[setup] loaded $candidate_module but found no usable python3 >= 3.11 with venv"
+  PYTHON_BIN=""
+done
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo >&2
+  echo "ERROR: no usable Python module found." >&2
+  echo "Tried: ${PYTHON_MODULE_CANDIDATES[*]}" >&2
+  echo >&2
+  echo "What is actually available:" >&2
+  module avail python 2>&1 | head -40 >&2
+  module avail anaconda 2>&1 | head -20 >&2
+  echo >&2
+  echo "Then rerun with the correct name:" >&2
+  echo "  sbatch --export=ALL,COMMSTUDY_PYTHON_MODULE=<name> slurm/01_setup.sbatch" >&2
+  echo "Or run 'sbatch slurm/00_probe.sbatch' for a full report." >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------- environment
 if [[ ! -x "$VENV/bin/python" ]]; then
-  echo "[setup] creating virtualenv"
-  python -m venv "$VENV"
+  echo "[setup] creating virtualenv at $VENV"
+  "$PYTHON_BIN" -m venv "$VENV"
 fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
+# Inside an activated venv, `python` always exists, so plain `python` is safe
+# from here on -- unlike before activation.
+echo "[setup] venv python    $(command -v python) ($(python -V 2>&1))"
+
 echo "[setup] installing packages"
-echo "[setup] if this step fails, run these four commands on a LOGIN node:"
+echo "[setup] if this step fails with network/DNS errors, run on a LOGIN node:"
 echo "        module load $PYTHON_MODULE $CUDA_MODULE"
 echo "        source $VENV/bin/activate"
 echo "        pip install --index-url $TORCH_INDEX 'torch>=2.7'"
 echo "        pip install -e '.[dev,analysis]'"
+echo "        then resubmit this script to build the manifests."
 
 python -m pip install --upgrade pip wheel setuptools
 # Install the CUDA torch build first so benchmarl/torchrl cannot pull the CPU
@@ -101,6 +167,16 @@ python scripts/sweep.py \
   configs/sweeps/simple_spread_comm_v2_stage4_sender_budget.yaml \
   configs/sweeps/simple_spread_comm_v2_stage4_self_communication.yaml \
   --combine-out runs/_manifests/ablations.csv | tail -2
+
+# Record the resolved module so the training jobs use the identical one.
+cat > "$REPO_DIR/slurm/.resolved_env" <<EOF
+# Written by 01_setup.sbatch. Sourced by newton_env.sh so every training job
+# uses exactly the interpreter this setup verified.
+COMMSTUDY_PYTHON_MODULE="$PYTHON_MODULE"
+COMMSTUDY_CUDA_MODULE="$CUDA_MODULE"
+COMMSTUDY_VENV="$VENV"
+EOF
+echo "[setup] recorded resolved environment in slurm/.resolved_env"
 
 echo
 echo "=============================================================="

@@ -4,12 +4,16 @@
 # Sourced (never executed) by every job script, so the module/venv setup lives
 # in exactly one place. Sourcing needs no execute permission.
 #
-# Override any value by exporting it before submission, e.g.
+# Module names are read from slurm/.resolved_env when it exists, which
+# 01_setup.sbatch writes after verifying an interpreter actually works. That
+# guarantees the training jobs use the same Python the setup validated instead
+# of re-guessing. Override anything by exporting it before submission:
 #
-#     COMMSTUDY_VENV=$HOME/envs/other sbatch slurm/02_main_comparison.sbatch
+#     sbatch --export=ALL,COMMSTUDY_CUDA_MODULE=cuda/cuda-12.6.0 \
+#       slurm/02_main_comparison.sbatch
 #
-# Newton specifics this encodes (verify against `module avail` and `sinfo`,
-# which are the only authoritative sources on your account):
+# Newton specifics this encodes (verify with `sbatch slurm/00_probe.sbatch`,
+# which prints the ground truth for your account):
 #   * Slurm queues are `normal` (default) and `preemptable`.
 #   * GPUs are requested with --gres=gpu:N.
 #   * Modules are named <family>/<name-version>, e.g. cuda/cuda-12.4.0.
@@ -22,22 +26,40 @@ set -euo pipefail
 # SLURM_SUBMIT_DIR is where sbatch was invoked, which is the repo root in the
 # documented workflow. It keeps the scripts working from any clone path.
 COMMSTUDY_REPO="${COMMSTUDY_REPO:-${SLURM_SUBMIT_DIR:-$HOME/marl-comm}}"
-COMMSTUDY_VENV="${COMMSTUDY_VENV:-$COMMSTUDY_REPO/.venv-newton}"
 
-# --- Modules ------------------------------------------------------------------
-# Newton lists python-3.11.4-gcc-12.2.0; pyproject requires >=3.11.
+# Values verified and recorded by 01_setup.sbatch. Anything already exported
+# wins, so a manual override is still honoured.
+if [[ -f "$COMMSTUDY_REPO/slurm/.resolved_env" ]]; then
+  _resolved_python="${COMMSTUDY_PYTHON_MODULE:-}"
+  _resolved_cuda="${COMMSTUDY_CUDA_MODULE:-}"
+  _resolved_venv="${COMMSTUDY_VENV:-}"
+  # shellcheck disable=SC1091
+  source "$COMMSTUDY_REPO/slurm/.resolved_env"
+  [[ -n "$_resolved_python" ]] && COMMSTUDY_PYTHON_MODULE="$_resolved_python"
+  [[ -n "$_resolved_cuda" ]] && COMMSTUDY_CUDA_MODULE="$_resolved_cuda"
+  [[ -n "$_resolved_venv" ]] && COMMSTUDY_VENV="$_resolved_venv"
+  unset _resolved_python _resolved_cuda _resolved_venv
+fi
+
+COMMSTUDY_VENV="${COMMSTUDY_VENV:-$COMMSTUDY_REPO/.venv-newton}"
 COMMSTUDY_PYTHON_MODULE="${COMMSTUDY_PYTHON_MODULE:-python/python-3.11.4-gcc-12.2.0}"
 COMMSTUDY_CUDA_MODULE="${COMMSTUDY_CUDA_MODULE:-cuda/cuda-12.4.0}"
 
-module purge
-module load "$COMMSTUDY_PYTHON_MODULE"
-module load "$COMMSTUDY_CUDA_MODULE"
+# --- Modules ------------------------------------------------------------------
+module purge >/dev/null 2>&1 || true
+module load "$COMMSTUDY_PYTHON_MODULE" >/dev/null 2>&1 \
+  || echo "[env] WARNING: could not load $COMMSTUDY_PYTHON_MODULE"
+module load "$COMMSTUDY_CUDA_MODULE" >/dev/null 2>&1 \
+  || echo "[env] WARNING: could not load $COMMSTUDY_CUDA_MODULE"
 
-if [[ ! -d "$COMMSTUDY_VENV" ]]; then
+if [[ ! -x "$COMMSTUDY_VENV/bin/python" ]]; then
   echo "ERROR: virtualenv not found at $COMMSTUDY_VENV" >&2
-  echo "Create it once on a login node with slurm/bootstrap_newton.sh" >&2
+  echo "Create it once with:  sbatch slurm/01_setup.sbatch" >&2
+  echo "If that fails, diagnose with:  sbatch slurm/00_probe.sbatch" >&2
   exit 1
 fi
+# Activating the venv puts a guaranteed `python` on PATH, so the job scripts
+# never depend on whether a module happened to provide one.
 # shellcheck disable=SC1091
 source "$COMMSTUDY_VENV/bin/activate"
 
@@ -61,7 +83,7 @@ export COMMSTUDY_DEVICE
 
 echo "[env] repo=$COMMSTUDY_REPO"
 echo "[env] venv=$COMMSTUDY_VENV"
-echo "[env] python=$(python -V 2>&1)"
+echo "[env] python=$(command -v python) ($(python -V 2>&1))"
 echo "[env] device=$COMMSTUDY_DEVICE threads=$COMMSTUDY_THREADS"
 echo "[env] node=$(hostname) job=${SLURM_JOB_ID:-none} task=${SLURM_ARRAY_TASK_ID:-none}"
 python - <<'PY'
