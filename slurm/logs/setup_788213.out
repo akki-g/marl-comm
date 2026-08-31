@@ -1,0 +1,7 @@
+==============================================================
+repo   /lustre/fs1/home/ak565492/marl-comm
+venv   /lustre/fs1/home/ak565492/marl-comm/.venv-newton
+python python/python-3.11.4-gcc-12.2.0
+cuda   cuda/cuda-12.4.0
+==============================================================
+[setup] creating virtualenv
