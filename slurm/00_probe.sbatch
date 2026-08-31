@@ -116,6 +116,19 @@ for host in ("pypi.org", "download.pytorch.org"):
         print(f"{host:28} UNREACHABLE ({error})")
 ' 2>&1 || echo "could not run network check"
 
+banner "resource limits"
+# `failed to map segment from shared object` when importing torch is usually an
+# address-space cap rather than a broken install: libtorch_cuda.so is 1-2 GB and
+# login nodes often set `ulimit -v`. Compute nodes normally do not.
+ulimit -a 2>&1 | sed 's/^/  /'
+
+banner "storage quota"
+# A truncated .so from an install that hit quota produces the same import error,
+# so distinguish the two.
+{ lfs quota -h -u "$USER" /lustre/fs1 2>/dev/null \
+  || quota -s 2>/dev/null \
+  || echo "  quota command unavailable"; } | sed 's/^/  /'
+
 banner "existing virtualenv"
 VENV="${COMMSTUDY_VENV:-${SLURM_SUBMIT_DIR:-$PWD}/.venv-newton}"
 if [[ ! -x "$VENV/bin/python" ]]; then
@@ -132,6 +145,16 @@ else
     fi
   done
   "$VENV/bin/python" -c 'import torch; print(f"  cuda available {torch.cuda.is_available()}")' 2>/dev/null || true
+
+  # Size check separates "install is fine, login node was the problem" from
+  # "install was truncated". A healthy libtorch_cuda.so is on the order of GB.
+  echo
+  echo "  shared library integrity:"
+  find "$VENV" -name 'libtorch_cuda.so' -o -name 'libtorch_cpu.so' 2>/dev/null \
+    | head -4 | while read -r lib; do
+        printf '    %10s  %s\n' "$(du -h "$lib" 2>/dev/null | cut -f1)" "${lib##*/}"
+      done
+  echo "    venv total: $(du -sh "$VENV" 2>/dev/null | cut -f1)"
 fi
 
 banner "done"

@@ -231,6 +231,31 @@ def test_probe_reports_venv_completeness_and_network():
         assert package in probe
 
 
+def test_probe_diagnoses_shared_object_mapping_failures():
+    """`failed to map segment` has two causes; the probe must separate them.
+
+    Either the login node caps address space (install is fine), or the library
+    was truncated by a quota limit (install is broken). Reporting ulimit, quota,
+    and the actual library size distinguishes them.
+    """
+
+    probe = (SLURM / "00_probe.sbatch").read_text(encoding="utf-8")
+
+    assert "ulimit -a" in probe
+    assert "quota" in probe
+    assert "libtorch_cuda.so" in probe
+
+
+def test_probe_reports_gpu_selection_strings():
+    """Pinning V100 vs H100 requires the cluster's real GRES/feature strings."""
+
+    probe = (SLURM / "00_probe.sbatch").read_text(encoding="utf-8")
+
+    assert "--gres=gpu:h100:1" in probe
+    assert "--constraint=h100" in probe
+    assert "scontrol show nodes" in probe
+
+
 def test_probe_makes_no_changes():
     """The diagnostic must be safe to run at any time, including mid-study."""
 

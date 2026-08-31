@@ -169,14 +169,32 @@ pip install --index-url https://download.pytorch.org/whl/cu126 'torch>=2.7'
 pip install -e '.[dev,analysis]'
 ```
 
-Verify before resubmitting — this must print versions, not a traceback:
+**Do not verify the install by importing torch on the login node.** Verify with
+a job instead:
 
 ```bash
-python -c 'import torch, benchmarl, torchrl, tensordict, vmas; print(torch.__version__)'
+sbatch slurm/00_probe.sbatch
+cat slurm/logs/probe_<jobid>.out     # reports every package version
 ```
 
-`torch.cuda.is_available()` will be `False` on a login node with no GPU; that is
-expected. `01_setup.sbatch` checks it properly from a compute node.
+**`ImportError: libtorch_cuda.so: failed to map segment from shared object`.**
+This nearly always means the *login node*, not a broken install.
+`libtorch_cuda.so` is 1–2 GB, and login nodes commonly cap address space
+(`ulimit -v`) to stop heavy work there, so the mmap fails. Compute nodes
+normally have no such cap.
+
+Confirm by importing on a compute node — if it works there, the install is fine
+and nothing needs fixing:
+
+```bash
+srun --gres=gpu:1 --pty .venv-newton/bin/python \
+  -c 'import torch; print(torch.__version__, torch.cuda.is_available())'
+```
+
+The same error can also come from a **truncated** library if the install hit a
+quota limit. `00_probe.sbatch` reports `ulimit -a`, your Lustre quota, and the
+actual size of `libtorch_cuda.so`, which separates the two cases: a healthy file
+is on the order of gigabytes.
 
 A venv that exists but is incomplete is now caught once, in `newton_env.sh`,
 with the remedy printed — instead of all 231 array tasks each dying inside an
