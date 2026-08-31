@@ -5,6 +5,7 @@ from pathlib import Path
 
 from commstudy.experiments.sweeps import (
     DEFAULT_STALE_AFTER_SECONDS,
+    create_combined_manifest,
     create_manifest,
     execute_plan,
     format_plan_table,
@@ -18,8 +19,18 @@ from commstudy.experiments.sweeps import (
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Plan or execute a commstudy sweep.")
-    parser.add_argument("suite", nargs="?", type=Path)
+    parser.add_argument("suite", nargs="*", type=Path)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument(
+        "--combine-out",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Expand every given suite into one combined manifest at PATH so a "
+            "multi-suite study is a single Slurm array. Per-suite manifests are "
+            "still written."
+        ),
+    )
     parser.add_argument("--run", action="store_true", help="Execute selected rows.")
     parser.add_argument("--dry-run", action="store_true", help="Print without training.")
     parser.add_argument("--index", type=int, help="Zero-based manifest/Slurm array index.")
@@ -83,10 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     parsed_arguments, extra_overrides = _partition_overrides(arguments)
     parser = _parser()
     args = parser.parse_args(parsed_arguments)
-    if args.suite is None and args.manifest is None:
-        parser.error("provide a suite YAML or --manifest")
-    if args.suite is not None and args.manifest is not None:
-        parser.error("provide a suite YAML or --manifest, not both")
+    if not args.suite and args.manifest is None:
+        parser.error("provide one or more suite YAMLs, or --manifest")
+    if args.suite and args.manifest is not None:
+        parser.error("provide suite YAMLs or --manifest, not both")
+    if len(args.suite) > 1 and args.combine_out is None:
+        parser.error("multiple suites require --combine-out")
     if args.run and args.dry_run:
         parser.error("--run and --dry-run are mutually exclusive")
     if args.count < 1:
@@ -95,8 +108,18 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--count requires --index")
 
     repo_root = Path(__file__).resolve().parents[1]
-    if args.suite is not None:
-        manifest_path, plans = create_manifest(args.suite.resolve(), repo_root=repo_root)
+    if args.suite and args.combine_out is not None:
+        manifest_path, plans = create_combined_manifest(
+            [path.resolve() for path in args.suite],
+            args.combine_out.resolve(),
+            repo_root=repo_root,
+        )
+        print(f"{manifest_path}: {len(plans)} rows from {len(args.suite)} suites")
+        print(f"array range: 0-{len(plans) - 1}")
+    elif args.suite:
+        manifest_path, plans = create_manifest(args.suite[0].resolve(), repo_root=repo_root)
+        print(f"{manifest_path}: {len(plans)} rows")
+        print(f"array range: 0-{len(plans) - 1}")
     else:
         manifest_path = args.manifest.resolve()
         # Array workers treat the manifest as immutable input and write only

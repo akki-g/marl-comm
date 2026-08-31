@@ -277,15 +277,22 @@ creates a new retry ID.
 
 ## Running on a cluster (UCF ARCC Newton)
 
-Rows are fully independent, so a suite runs as a Slurm job array. See
-[slurm/README.md](slurm/README.md) for setup, submission, preemption handling,
-and cost notes.
+Rows are fully independent, so each experiment runs as a Slurm job array. Four
+numbered scripts, submitted in order — `sbatch` is the only command needed:
 
 ```bash
-bash slurm/bootstrap_newton.sh                                  # once, login node
-bash slurm/submit.sh --all --chunk 4 --max-concurrent 25        # 231 rows
-sbatch --dependency=afterany:<jobid> slurm/analyze_suite.sbatch simple_spread_comm_v2
+cd ~/marl-comm
+sbatch slurm/01_setup.sbatch            # once: venv, CUDA check, manifests
+sbatch slurm/02_main_comparison.sbatch  # 30 rows  — MLP + 5 comm methods x 5 seeds
+sbatch slurm/03_ablations.sbatch        # 201 rows — all seven ablations
+sbatch slurm/04_analyze.sbatch          # CSVs, plots, REPORT.md
 ```
+
+Wait for `01` before submitting `02`/`03`; they read the manifests it writes.
+`02` and `03` are independent and can run concurrently. Re-submitting a training
+script is the recovery path after preemption: completed rows are skipped and
+abandoned rows are retried. See [slurm/README.md](slurm/README.md) for module
+overrides, monitoring, preemption, cost, and storage.
 
 Two things to be deliberate about:
 

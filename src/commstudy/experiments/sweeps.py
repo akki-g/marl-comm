@@ -256,6 +256,44 @@ def create_manifest(suite_path: Path, *, repo_root: Path) -> tuple[Path, list[Ru
     return manifest_path, plans
 
 
+def create_combined_manifest(
+    suite_paths: Sequence[Path],
+    destination: Path,
+    *,
+    repo_root: Path,
+) -> tuple[Path, list[RunPlan]]:
+    """Expand several suites into one manifest addressable by a single array.
+
+    Each row already carries its own ``suite_id`` and ``output_root``, so runs
+    still land in their own suite directories and per-suite analysis is
+    unaffected. This exists so a whole multi-suite study is one Slurm array
+    with one contiguous index range, instead of one array per suite whose
+    ranges must be tracked by hand.
+
+    Per-suite manifests are written as well, so ``--status`` and the analysis
+    tooling keep working per suite.
+    """
+
+    plans: list[RunPlan] = []
+    seen: set[str] = set()
+    for suite_path in suite_paths:
+        _, suite_plans = create_manifest(Path(suite_path), repo_root=repo_root)
+        for plan in suite_plans:
+            if plan.run_id in seen:
+                raise ValueError(
+                    f"Duplicate run_id across combined suites: {plan.run_id}"
+                )
+            seen.add(plan.run_id)
+        plans.extend(suite_plans)
+
+    if not plans:
+        raise ValueError("Combined sweep expanded to zero runs.")
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    write_manifest(destination, plans)
+    return destination, plans
+
+
 def sync_manifest_status(
     path: Path,
     plans: Sequence[RunPlan] | None = None,

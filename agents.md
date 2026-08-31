@@ -944,17 +944,33 @@ published docs are thin.
 
 ### Infrastructure added for the cluster
 
-- `slurm/bootstrap_newton.sh` — one-time login-node venv build; installs the
-  CUDA torch wheel before the project so the CPU wheel is not pulled in
-  transitively.
-- `slurm/newton_env.sh` — single shared module/venv/thread/device bootstrap.
-- `slurm/run_suite.sbatch` — array worker; each task owns a contiguous chunk of
-  manifest rows and passes device overrides.
-- `slurm/submit.sh` — builds manifests, derives the array range from the actual
-  row count so it cannot drift, names jobs after suites, supports `--all` and
-  `--dry-run`.
-- `slurm/analyze_suite.sbatch` — status sync, saliency, aggregation, report.
-- `slurm/README.md` — setup, monitoring, preemption, storage, cost.
+The user cannot execute helper shell scripts on the cluster, so the workflow is
+four numbered sbatch files and nothing else. `sbatch` is the only command.
+
+- `slurm/01_setup.sbatch` — venv build, hard CUDA visibility check (fails the
+  job rather than silently training on CPU), and writes **all** manifests so
+  the training arrays never race to create them. Prints login-node fallback
+  commands in case compute nodes have no outbound network.
+- `slurm/02_main_comparison.sbatch` — `--array=0-29%15`, 30 rows.
+- `slurm/03_ablations.sbatch` — `--array=0-200%20`, 201 rows across all seven
+  ablation suites via one **combined manifest**.
+- `slurm/04_analyze.sbatch` — per suite: status sync, protocol-gate audit,
+  saliency, aggregate, report. Tolerates suites with no finished checkpoints.
+- `slurm/newton_env.sh` — sourced (never executed, so no exec bit needed):
+  modules, venv, pinned threads, device.
+- `slurm/README.md` — what each experiment is, module verification, monitoring,
+  preemption recovery, cost, storage, output layout.
+
+`create_combined_manifest()` expands several suites into one manifest. Each row
+already carries its own `suite_id` and `output_root`, so runs still land in
+their own suite directories and per-suite analysis is untouched; the point is
+that a seven-suite study becomes one contiguous array index range instead of
+seven ranges tracked by hand. Duplicate run IDs across combined suites raise.
+
+`src/tests/test_slurm_scripts.py` (15 tests) pins the invariant that the
+hand-written `#SBATCH --array=0-N` ranges equal what the suite YAMLs actually
+expand to. Without it, adding a seed or ablation value would silently leave the
+extra rows unexecuted with no error anywhere.
 
 ### Resumability defect found and fixed
 
@@ -1046,10 +1062,11 @@ shell scripts, and `git diff --check` pass.
 **Next agent starts here.** On Newton, from a fresh clone (do not copy `runs/`):
 
 ```bash
-bash slurm/bootstrap_newton.sh
-bash slurm/submit.sh --all --chunk 4 --max-concurrent 25
-# then per suite, after training finishes:
-sbatch --dependency=afterany:<jobid> slurm/analyze_suite.sbatch <suite_id>
+cd ~/marl-comm
+sbatch slurm/01_setup.sbatch            # wait for this to finish
+sbatch slurm/02_main_comparison.sbatch  # 30 rows
+sbatch slurm/03_ablations.sbatch        # 201 rows
+sbatch slurm/04_analyze.sbatch          # or --dependency=afterany:<ids>
 ```
 
 Then re-run the MLP protocol gate **on CUDA** before trusting cross-method

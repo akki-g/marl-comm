@@ -1,55 +1,108 @@
 # Running the study on UCF ARCC Newton
 
-Newton is UCF's GPU cluster (V100 and H100 nodes) scheduled with Slurm. These
-scripts run the full V2 communication study there as job arrays.
+Four numbered scripts, submitted with `sbatch` in order. No helper shell scripts
+to execute — the only command you ever run is `sbatch`.
+
+```bash
+cd ~/marl-comm
+
+sbatch slurm/01_setup.sbatch            # once: venv, CUDA check, manifests
+sbatch slurm/02_main_comparison.sbatch  # 30 rows  — MLP + 5 comm methods x 5 seeds
+sbatch slurm/03_ablations.sbatch        # 201 rows — full ablation study
+sbatch slurm/04_analyze.sbatch          # CSVs, plots, REPORT.md
+```
+
+Wait for `01` to finish before submitting `02` or `03`; they need the manifests
+it writes. `02` and `03` are independent and can run at the same time. Chain the
+analysis so it starts automatically:
+
+```bash
+sbatch --dependency=afterany:<main_jobid>:<ablation_jobid> slurm/04_analyze.sbatch
+```
+
+`slurm/newton_env.sh` is *sourced* by the job scripts, never executed, so it
+needs no execute permission.
+
+## What each experiment is
+
+**`02_main_comparison.sbatch` — 30 rows, the headline result.** Six models x
+five seeds at 600,000 frames on stock VMAS Simple Spread:
+
+| Model | Method |
+|---|---|
+| `benchmarl_mlp` | framework reference MLP |
+| `comm_identity` | no-communication control, same actor shell |
+| `comm_broadcast` | CommNet-inspired mean broadcast |
+| `comm_gated` | IC3Net-inspired sender gating |
+| `comm_attention` | TarMAC-inspired targeted attention |
+| `comm_graph` | DGN/GAT-inspired graph message passing |
+
+**`03_ablations.sbatch` — 201 rows, seeds 0-2, same frozen protocol** so every
+ablation is directly comparable to the main comparison:
+
+| Ablation | Rows | Values |
+|---|---:|---|
+| `message_dim` | 48 | 8 / 16 / 32 / 64, all four learned modules |
+| `communication_dropout` | 48 | p = 0.00 / 0.25 / 0.50 / 0.75 |
+| `communication_rounds` | 18 | 1 / 2 / 3, attention + graph |
+| `attention_heads` | 24 | 1 / 2 / 4 / 8 at fixed total width |
+| `graph_topology` | 9 | full / directed ring / Erdos-Renyi |
+| `sender_budget` | 36 | learned-K vs seeded random-K control |
+| `self_communication` | 18 | `exclude_self` true / false |
+
+All seven share one combined manifest, so this is a single contiguous array
+rather than seven ranges to track by hand. Each row still writes into its own
+suite directory, so per-suite analysis is unchanged.
+
+Every ablation re-runs its own default point (`message_dim=32`, `rounds=1`,
+`topology=full`, `heads=4`, `exclude_self=true`). Those are matched in-suite
+controls that should reproduce the main-suite rows on seeds 0-2 — a free
+reproducibility check.
 
 ## Read this before you submit
 
-**A GPU will not make an individual row faster.** The actors in this study are
-19k–35k parameters and the task runs 10 vectorised VMAS environments with three
-agents. That workload is far too small to saturate a V100 or H100; per-row time
-is dominated by Python and kernel-launch overhead, and a single row may well be
-*slower* on a GPU than on one CPU core. Locally each 600k-frame row takes about
-6–14 minutes on a single core.
+**A GPU will not make an individual row faster.** The actors are 19k-35k
+parameters and the task runs 10 vectorised VMAS environments with three agents.
+That is far too small to saturate a V100 or H100; per-row time is dominated by
+Python and kernel-launch overhead, and a single row may well be *slower* on a
+GPU than on one CPU core. Locally each 600k-frame row takes 6-14 minutes on one
+core.
 
-The cluster win is **horizontal**, not per-row: 231 rows are fully independent,
-so an array finishes in roughly the time of the slowest chunk instead of the sum
-of all rows.
+The cluster win is **horizontal**: 231 rows are fully independent, so the array
+finishes in roughly the time of the slowest wave rather than the sum of all
+rows.
 
-Two consequences worth deciding on deliberately:
-
-- If you want GPU utilisation to actually pay off, the lever is
+- Making a GPU genuinely worthwhile would mean raising
   `experiment.on_policy_n_envs_per_worker` (BenchMARL's own fine-tuned VMAS
-  config uses 600 environments against our 10). That is a **protocol change**:
-  it invalidates the frozen protocol, the passed five-seed MLP gate, and every
-  row already collected. Do not do it mid-study.
-- **Device changes numerics.** CPU and CUDA runs are not directly comparable.
-  Run a suite entirely on one device. Each run records its device in
-  `metadata.json`, and `REPORT.md` warns when a suite mixes devices.
+  config uses 600 against our 10). That is a **protocol change**: it invalidates
+  the frozen protocol, the passed five-seed MLP gate, and every collected row.
+  Do not do it mid-study.
+- If you only want the results fast with the protocol intact, edit the two
+  training scripts to drop `--gres=gpu:1`, raise `--cpus-per-task`, and let
+  `newton_env.sh` default `COMMSTUDY_DEVICE=cpu`. It costs far fewer DPH.
 
-If you simply want the results as fast as possible with the existing protocol
-intact, request several CPUs and no GPU (`--gpus 0`) and raise `--chunk`; the
-scripts support it and it costs far fewer DPH.
+**Device changes numerics.** CPU and CUDA runs are not directly comparable, so a
+suite must execute entirely on one device. `runs/` is Git-ignored, so a fresh
+clone on Newton starts with zero completed rows and the whole study runs on one
+device automatically — **do not copy `runs/` from your laptop**. `REPORT.md`
+warns if it detects a suite that mixes devices or commits.
 
-## One-time setup (login node)
-
-```bash
-git clone <your remote> ~/marl-comm
-cd ~/marl-comm
-bash slurm/bootstrap_newton.sh
-```
-
-This loads `python/python-3.11.4-gcc-12.2.0` and `cuda/cuda-12.4.0`, creates
-`.venv-newton`, installs the CUDA build of PyTorch first so the CPU wheel is not
-pulled in transitively, then installs the project. It prints a verification
-block; confirm `cuda available` on a compute node rather than the login node:
+**The CPU protocol gate does not automatically transfer.** After `02` finishes,
+check the MLP rows on CUDA before trusting any cross-method comparison:
 
 ```bash
-srun --gres=gpu:1 --pty nvidia-smi
+grep -A3 benchmarl_mlp results/simple_spread_comm_v2/REPORT.md
 ```
 
-Verify the module names against your account before trusting the defaults —
-they are the values most likely to drift:
+Expect all-finite metrics, entropy near 1, zero deterministic action saturation,
+and final returns clustered near −430..−560. If CUDA reproduces that, the
+protocol transfers; if not, stop and diagnose before interpreting communication
+rows.
+
+## Before the first submission
+
+Verify the module names and partitions on your account — these are the values
+most likely to have drifted from the published docs:
 
 ```bash
 module avail python
@@ -57,50 +110,35 @@ module avail cuda
 sinfo -o "%P %l %G %D"     # partitions, time limits, GRES, node counts
 ```
 
-Override any of them without editing files:
+Defaults baked into the scripts: partition `normal`, `--gres=gpu:1`,
+`python/python-3.11.4-gcc-12.2.0`, `cuda/cuda-12.4.0`. Override without editing
+files:
 
 ```bash
-COMMSTUDY_PYTHON_MODULE=python/python-3.11.4-oneapi-2023.1.0 \
-COMMSTUDY_CUDA_MODULE=cuda/cuda-12.6.0 \
-  bash slurm/bootstrap_newton.sh
+sbatch --export=ALL,COMMSTUDY_CUDA_MODULE=cuda/cuda-12.6.0 slurm/01_setup.sbatch
 ```
 
-## Submitting
+If `01_setup.sbatch` fails with network or DNS errors, Newton's compute nodes
+have no outbound internet. Run the install on a **login node** instead, then
+resubmit `01` to do the manifest half:
 
 ```bash
-# One suite.
-bash slurm/submit.sh configs/sweeps/simple_spread_comm_v2.yaml
-
-# See the exact sbatch command without submitting.
-bash slurm/submit.sh configs/sweeps/simple_spread_comm_v2.yaml --dry-run
-
-# Every V2 suite (231 rows total).
-bash slurm/submit.sh --all --chunk 4 --max-concurrent 25
+module load python/python-3.11.4-gcc-12.2.0 cuda/cuda-12.4.0
+python -m venv ~/marl-comm/.venv-newton
+source ~/marl-comm/.venv-newton/bin/activate
+pip install --index-url https://download.pytorch.org/whl/cu124 'torch>=2.7'
+pip install -e '.[dev,analysis]'
 ```
-
-`submit.sh` builds each manifest, derives the array range from the actual row
-count so it can never drift, names the job after the suite, and creates the log
-directory. Useful flags:
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--chunk N` | `4` | Manifest rows per array task, run sequentially |
-| `--max-concurrent N` | `25` | Array throttle (`--array=0-M%N`) |
-| `--partition NAME` | `normal` | Use `preemptable` when out of monthly DPH |
-| `--time HH:MM:SS` | `08:00:00` | Walltime per array task |
-| `--gpus N` | `1` | `0` requests no GPU |
-| `--cpus N` | `4` | Also sets the pinned thread count |
-| `--dependency SPEC` | – | Passed through to `sbatch` |
-
-Size the walltime against the chunk: one row is ~15 minutes of GPU time, so
-`--chunk 4` fits comfortably inside 8 hours with a wide safety margin.
 
 ## Monitoring
 
 ```bash
 squeue -u "$USER"
+tail -f slurm/logs/main/<jobid>_0.out
+
+source .venv-newton/bin/activate
 python scripts/sweep.py --manifest runs/simple_spread_comm_v2/manifest.csv --status
-tail -f slurm/logs/simple_spread_comm_v2/<jobid>_0.out
+python scripts/sweep.py --manifest runs/_manifests/ablations.csv --status
 ```
 
 `--status` reads the authoritative per-run `status.json` files, not the
@@ -110,37 +148,42 @@ scheduler, so it stays correct across resubmissions.
 
 A worker killed by preemption or a walltime limit cannot write a terminal
 status, so its row would otherwise sit at `running` forever — never retried and
-never reported as failed. Every run therefore writes a heartbeat once per
-collection iteration, and rows are reclaimable once they stop reporting:
+never reported as failed. Every run writes a heartbeat once per collection
+iteration, and the training scripts already pass `--reclaim-stale 3600`.
+
+**To recover from any interruption, just resubmit the same script.** Completed
+rows are skipped, abandoned rows are retried under an explicit `__retryNN` id
+with the original directory preserved as evidence, and a still-live worker is
+never stolen from.
 
 ```bash
-# Report abandoned rows as failed.
-python scripts/sweep.py --manifest runs/<suite>/manifest.csv --reclaim-stale 3600 --status
-
-# Resubmit; abandoned rows are retried under an explicit __retryNN id.
-bash slurm/submit.sh configs/sweeps/<suite>.yaml
+sbatch slurm/02_main_comparison.sbatch    # resubmitting is the recovery path
 ```
 
-The array workers already pass `--reclaim-stale 3600`, so simply resubmitting a
-suite picks up whatever the previous attempt abandoned. Completed rows are
-never rerun, and failed output is preserved rather than deleted.
-
-## Analysis
+To resubmit only the rows that failed, use the array's index list:
 
 ```bash
-sbatch --dependency=afterany:<training_job_id> \
-  slurm/analyze_suite.sbatch simple_spread_comm_v2
+sbatch --array=3,17,22 slurm/02_main_comparison.sbatch
 ```
 
-This syncs status, measures communication saliency from each frozen checkpoint,
-aggregates, plots, and writes `results/<suite>/REPORT.md`. Run it locally too:
+## Cost and storage
+
+Default allocation is 80,000 Dedicated Processor Hours per group per month.
+Switch to the preemptable queue once depleted — heartbeat reclamation makes
+preemption recoverable:
 
 ```bash
-python scripts/sweep.py --manifest runs/<suite>/manifest.csv --reclaim-stale 3600 --status
-python scripts/saliency.py runs/<suite> --out results/<suite>/<suite>_saliency.csv
-python scripts/analyze.py runs/<suite> --results-dir results/<suite>
-python scripts/report.py  runs/<suite> --results-dir results/<suite>
+sbatch --partition=preemptable slurm/03_ablations.sbatch
 ```
+
+Concurrency is capped in the scripts (`%15` for the main comparison, `%20` for
+ablations). Lower it if you are sharing the allocation.
+
+`$HOME` is on `/lustre/fs1` with a **1 TB / 1,000,000-file quota** and **no
+backups**. One completed run is ~108 files and ~5 MB, so the full 231-row study
+is roughly 25k files and 1.2 GB — comfortable, but the file count is the binding
+constraint if you later expand seeds or suites. Back up `runs/` and `results/`
+yourself.
 
 ## Output layout
 
@@ -158,25 +201,16 @@ runs/<suite_id>/                  managed run artifacts (git-ignored)
     checkpoints/policy_state.pt   final actor
     benchmarl/                    BenchMARL's own output tree
 
+runs/_manifests/ablations.csv     combined 201-row manifest for step 3
+
 results/<suite_id>/               regenerated analysis (git-ignored)
   REPORT.md                       start here
   *_per_run.csv  *_summary.csv  *_failed_runs.csv
-  *_paired_comparisons.csv  *_saliency.csv
+  *_paired_comparisons.csv  *_saliency.csv  *_run_audit.csv
   *.png
 
-slurm/logs/<suite_id>/<jobid>_<task>.out|.err
+slurm/logs/main/<jobid>_<task>.out|.err
+slurm/logs/ablations/<jobid>_<task>.out|.err
+slurm/logs/setup_<jobid>.out|.err
+slurm/logs/analyze_<jobid>.out|.err
 ```
-
-## Storage
-
-`$HOME` is on `/lustre/fs1` with a **1 TB / 1,000,000-file quota** and **no
-backups**. One completed run is ~108 files and ~5 MB, so the full 231-row study
-is roughly 25k files and 1.2 GB — comfortable, but the file count is the
-binding constraint if you later expand seeds or suites. Back up `runs/` and
-`results/` yourself; nothing on the cluster is backed up for you.
-
-## Cost
-
-The default group allocation is 80,000 Dedicated Processor Hours per month.
-Prefer `--partition preemptable` once depleted; combined with heartbeat-based
-reclamation, preempted rows are retried automatically on resubmission.

@@ -1,10 +1,12 @@
 #!/bin/bash
 # Shared environment bootstrap for UCF ARCC Newton.
 #
-# Sourced by every job script so the module/venv setup lives in exactly one
-# place. Override any value by exporting it before submission, e.g.
+# Sourced (never executed) by every job script, so the module/venv setup lives
+# in exactly one place. Sourcing needs no execute permission.
 #
-#     COMMSTUDY_VENV=$HOME/envs/other sbatch slurm/run_suite.sbatch ...
+# Override any value by exporting it before submission, e.g.
+#
+#     COMMSTUDY_VENV=$HOME/envs/other sbatch slurm/02_main_comparison.sbatch
 #
 # Newton specifics this encodes (verify against `module avail` and `sinfo`,
 # which are the only authoritative sources on your account):
@@ -17,7 +19,9 @@
 set -euo pipefail
 
 # --- Repository and environment locations ------------------------------------
-COMMSTUDY_REPO="${COMMSTUDY_REPO:-$HOME/marl-comm}"
+# SLURM_SUBMIT_DIR is where sbatch was invoked, which is the repo root in the
+# documented workflow. It keeps the scripts working from any clone path.
+COMMSTUDY_REPO="${COMMSTUDY_REPO:-${SLURM_SUBMIT_DIR:-$HOME/marl-comm}}"
 COMMSTUDY_VENV="${COMMSTUDY_VENV:-$COMMSTUDY_REPO/.venv-newton}"
 
 # --- Modules ------------------------------------------------------------------
