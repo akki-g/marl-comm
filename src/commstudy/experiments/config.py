@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from omegaconf import (
     DictConfig,
@@ -131,11 +132,11 @@ def load_experiment_spec(
 
     Merge order:
 
-        Bench project base config
-            ↓
-        selected algorithm experiment settings
+        configs/experiments/base.yaml (project defaults)
             ↓
         selected algorithm/task/model configs
+        (the algorithm's `experiment` block is merged over the
+         project's experiment defaults)
             ↓
         CLI overrides
 
@@ -187,11 +188,14 @@ def load_experiment_spec(
         str(selections["model"]),
     )
 
-    algorithm_experiment = (
-        algorithm_document.get(
-            "experiment",
-            {},
-        )
+    # An algorithm YAML carries two distinct things: `params`, which are
+    # algorithm-specific and belong in the BenchMARL AlgorithmConfig, and
+    # `experiment`, which are general training settings that belong in
+    # BenchMARL's ExperimentConfig. They are split here so that
+    # ExperimentSpec never mixes them.
+    algorithm_experiment = algorithm_document.pop(
+        "experiment",
+        {},
     )
 
     cli_config = OmegaConf.from_dotlist(

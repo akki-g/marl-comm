@@ -3,3 +3,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+
+# BenchMARL run folders (created in the cwd where train.py is launched)
+/*_simple_spread_*/
+outputs/

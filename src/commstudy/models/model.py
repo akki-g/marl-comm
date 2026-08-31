@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Type
-
 import torch
 from torch import nn
 from tensordict import TensorDictBase
@@ -40,10 +38,8 @@ class CommPolicyModel(Model):
     ): 
         super().__init__(**kwargs)
 
-        self._validate_usage()
-
         self.hidden_dim = hidden_dim
-        self.comm_context_keys = comm_context_keys or {}
+        self.comm_context_keys = dict(comm_context_keys or {})
 
         self.input_features = sum(
             spec.shape[-1]
@@ -93,6 +89,18 @@ class CommPolicyModel(Model):
             
         self.to(self.device)
 
+    def _perform_checks(self) -> None:
+        """
+        Called by ``benchmarl.models.common.Model.__init__``.
+
+        Runs BenchMARL's own spec checks and then the usage
+        restrictions specific to this model.
+        """
+        super()._perform_checks()
+
+        self._validate_usage()
+        self._validate_specs()
+
     def _validate_usage(self) -> None:
         if not self.input_has_agent_dim:
             raise ValueError(
@@ -109,12 +117,38 @@ class CommPolicyModel(Model):
                 "CommPolicyModel cannot be used as a critic."
             )
 
+    def _validate_specs(self) -> None:
+        """
+        Every input leaf must be [..., n_agents, features] and the
+        output leaf must be [..., n_agents, output_features].
+
+        Without this the agent dimension could be silently folded into
+        the feature dimension, producing a model that trains on
+        misaligned data instead of failing.
+        """
+        for key, spec in self.input_spec.items(True, True):
+            if len(spec.shape) < 2 or spec.shape[-2] != self.n_agents:
+                raise ValueError(
+                    f"CommPolicyModel input '{key}' should have shape "
+                    f"[..., n_agents, features] with n_agents="
+                    f"{self.n_agents}, got {tuple(spec.shape)}."
+                )
+
+        output_shape = self.output_leaf_spec.shape
+
+        if len(output_shape) < 2 or output_shape[-2] != self.n_agents:
+            raise ValueError(
+                f"CommPolicyModel output '{self.out_key}' should have "
+                f"shape [..., n_agents, features] with n_agents="
+                f"{self.n_agents}, got {tuple(output_shape)}."
+            )
+
     def _build_encoders(
         self,
         input_dim: int,
         hidden_dim: int,
         num_layers: int,
-        activation_class: Type[nn.Module],
+        activation_class: type[nn.Module],
     ) -> nn.ModuleList:
 
         if num_layers < 1:
@@ -128,7 +162,6 @@ class CommPolicyModel(Model):
             [
                 self._build_mlp(
                     input_dim=input_dim,
-                    output_dim=hidden_dim,
                     hidden_dim=hidden_dim,
                     num_layers=num_layers,
                     activation_class=activation_class,
@@ -158,10 +191,9 @@ class CommPolicyModel(Model):
     @staticmethod
     def _build_mlp(
         input_dim: int,
-        output_dim: int,
         hidden_dim: int,
         num_layers: int,
-        activation_class: Type[nn.Module],
+        activation_class: type[nn.Module],
     ) -> nn.Sequential:
 
         layers = []
@@ -206,6 +238,11 @@ class CommPolicyModel(Model):
         self,
         tensordict: TensorDictBase,
     ) -> CommContext:
+
+        if not self.comm_context_keys:
+            # IdentityComm and any other context-free module take this
+            # path, so the key scan stays out of the hot forward pass.
+            return CommContext()
 
         available_keys = set(
             tensordict.keys(
