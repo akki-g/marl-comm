@@ -1,0 +1,35 @@
+suite_id: simple_spread_identity_stability
+output_root: runs
+
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - comm_identity
+seeds:
+  - 0
+max_n_frames: 240000
+
+overrides:
+  experiment.evaluation_interval: 12000
+  experiment.on_policy_n_minibatch_iters: 10
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
+
+runs:
+  - ablation: optimizer_stability
+    ablation_value: gamma0.9_entropy0
+    overrides:
+      experiment.gamma: 0.9
+      algorithm_config.params.entropy_coef: 0.0
+
+  - ablation: optimizer_stability
+    ablation_value: gamma0.99_entropy0.01
+    overrides:
+      experiment.gamma: 0.99
+      algorithm_config.params.entropy_coef: 0.01
+
+  - ablation: optimizer_stability
+    ablation_value: gamma0.9_entropy0.01
+    overrides:
+      experiment.gamma: 0.9
+      algorithm_config.params.entropy_coef: 0.01

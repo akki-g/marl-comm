@@ -1,18 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import dataclasses
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from benchmarl.experiment import (
     Experiment,
     ExperimentConfig as BenchMARLExperimentConfig,
 )
+from benchmarl.experiment.callback import Callback
 from benchmarl.models import MlpConfig
 from benchmarl.models.common import ModelConfig
 
 from commstudy.algorithms import resolve_algorithm
+from commstudy.experiments.bookkeeping import RunContext, RunRecorder
 from commstudy.experiments.config import ExperimentSpec
+from commstudy.experiments.metrics import ExperimentMetricsCallback
 from commstudy.models import CommPolicyConfig
 from commstudy.tasks import resolve_task
 from commstudy.utils.imports import import_from_path
@@ -138,6 +143,7 @@ def _build_experiment_config(
 
 def build_experiment(
     spec: ExperimentSpec,
+    callbacks: Sequence[Callback] | None = None,
 ) -> Experiment:
     """
     Assemble a BenchMARL experiment from a commstudy ExperimentSpec.
@@ -194,6 +200,15 @@ def build_experiment(
         )
     )
 
+    # BenchMARL creates only the generated run-name child and deliberately
+    # uses ``parents=False``. Creating this parent here keeps every caller of
+    # the public build path safe, including unmanaged integration tests.
+    if experiment_config.save_folder is not None:
+        Path(experiment_config.save_folder).mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
     return Experiment(
         task=task,
         algorithm_config=algorithm_config,
@@ -201,11 +216,13 @@ def build_experiment(
         critic_model_config=critic_model_config,
         seed=spec.seed,
         config=experiment_config,
+        callbacks=list(callbacks or ()),
     )
 
 
 def run_experiment(
     spec: ExperimentSpec,
+    callbacks: Sequence[Callback] | None = None,
 ) -> Experiment:
     """
     Build and execute an experiment.
@@ -214,9 +231,51 @@ def run_experiment(
     programmatic analysis of training results.
     """
     experiment = build_experiment(
-        spec
+        spec,
+        callbacks=callbacks,
     )
 
     experiment.run()
 
     return experiment
+
+
+def run_managed_experiment(
+    spec: ExperimentSpec,
+    context: RunContext,
+    *,
+    repo_root: Path,
+    overrides: Sequence[str] = (),
+    callbacks: Sequence[Callback] = (),
+) -> Experiment:
+    """Execute one run with durable metadata, status, and tidy metrics."""
+    managed_spec = dataclasses.replace(
+        spec,
+        experiment={
+            **spec.experiment,
+            "save_folder": str(context.benchmarl_dir.resolve()),
+        },
+    )
+    recorder = RunRecorder(
+        context,
+        managed_spec,
+        repo_root=repo_root,
+        overrides=overrides,
+    )
+    recorder.start()
+
+    try:
+        experiment = build_experiment(
+            managed_spec,
+            callbacks=[
+                ExperimentMetricsCallback(context.run_dir, heartbeat=recorder.heartbeat),
+                *callbacks,
+            ],
+        )
+        recorder.record_experiment(experiment)
+        experiment.run()
+        recorder.complete(experiment)
+        return experiment
+    except BaseException as error:
+        recorder.fail(error)
+        raise

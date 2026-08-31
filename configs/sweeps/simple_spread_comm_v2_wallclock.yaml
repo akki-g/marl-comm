@@ -1,0 +1,37 @@
+# Controlled per-method compute-overhead measurement.
+#
+# Wall-clock time recorded inside the main V2 suites is contended: several
+# single-threaded rows execute concurrently, so it measures scheduling as much
+# as it measures the method. This short suite exists to be run strictly
+# sequentially on an otherwise idle machine with one thread per process, which
+# makes the compute cost of each communication mechanism comparable.
+#
+# It is a timing instrument, not a scientific result: 60,000 frames is far too
+# short to say anything about learning, and its rows are labelled with a
+# dedicated ablation so they can never be mixed into the main comparison.
+suite_id: simple_spread_comm_v2_wallclock
+run_namespace: v2
+output_root: runs
+
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - benchmarl_mlp
+  - comm_identity
+  - comm_broadcast
+  - comm_gated
+  - comm_attention
+  - comm_graph
+seeds:
+  - 0
+max_n_frames: 60000
+ablation: wallclock_benchmark
+ablation_value: 60000_frames_sequential
+
+overrides:
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.1
+  experiment.on_policy_n_minibatch_iters: 5
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_interval: 0
+  experiment.checkpoint_at_end: false

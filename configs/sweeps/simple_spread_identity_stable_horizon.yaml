@@ -1,0 +1,21 @@
+suite_id: simple_spread_identity_stable_horizon
+output_root: runs
+
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - comm_identity
+seeds:
+  - 0
+max_n_frames: 600000
+
+ablation: stable_horizon
+ablation_value: 600000
+
+overrides:
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.01
+  experiment.evaluation_interval: 12000
+  experiment.on_policy_n_minibatch_iters: 10
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2

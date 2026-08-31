@@ -1,5 +1,7 @@
 .venv/
+.venv-*/
 .pytest_cache/
+.ruff_cache/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -7,3 +9,11 @@ __pycache__/
 # BenchMARL run folders (created in the cwd where train.py is launched)
 /*_simple_spread_*/
 outputs/
+
+# Managed experiment artifacts. Keep suite definitions and analysis code in
+# Git; raw checkpoints/logs and regenerated result products stay local.
+/runs/
+/results/
+
+# Scheduler stdout/stderr. The submit scripts themselves are tracked.
+/slurm/logs/

@@ -1,0 +1,50 @@
+# Train and evaluate with independently sampled whole-sender failures. The
+# realized mask is emitted by CommPolicyModel into each rollout TensorDict and
+# replayed during PPO optimization, so stored and recomputed log-probabilities
+# are conditioned on the same channel realization.
+suite_id: simple_spread_comm_v1_stage2_dropout
+output_root: runs
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - comm_broadcast
+  - comm_gated
+  - comm_attention
+  - comm_graph
+seeds: [0, 1, 2]
+max_n_frames: 600000
+# Frozen common MAPPO protocol from the Identity calibration and confirmation.
+overrides:
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.01
+  experiment.on_policy_n_minibatch_iters: 10
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_interval: 120000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
+
+runs:
+  - ablation: communication_dropout
+    ablation_value: p0.00
+    overrides:
+      model_config.params.comm_kwargs.channel.type: dropout
+      model_config.params.comm_kwargs.channel.p: 0.0
+      model_config.params.comm_kwargs.channel.mode: always
+  - ablation: communication_dropout
+    ablation_value: p0.25
+    overrides:
+      model_config.params.comm_kwargs.channel.type: dropout
+      model_config.params.comm_kwargs.channel.p: 0.25
+      model_config.params.comm_kwargs.channel.mode: always
+  - ablation: communication_dropout
+    ablation_value: p0.50
+    overrides:
+      model_config.params.comm_kwargs.channel.type: dropout
+      model_config.params.comm_kwargs.channel.p: 0.5
+      model_config.params.comm_kwargs.channel.mode: always
+  - ablation: communication_dropout
+    ablation_value: p0.75
+    overrides:
+      model_config.params.comm_kwargs.channel.type: dropout
+      model_config.params.comm_kwargs.channel.p: 0.75
+      model_config.params.comm_kwargs.channel.mode: always

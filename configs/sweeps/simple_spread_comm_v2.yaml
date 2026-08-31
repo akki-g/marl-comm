@@ -1,0 +1,33 @@
+# Selected baseline-wide MAPPO candidate, pending a fresh 600k five-seed MLP
+# confirmation gate. Run only the MLP rows until that gate passes; then use the
+# same protocol unchanged for every communication method.
+suite_id: simple_spread_comm_v2
+run_namespace: v2
+output_root: runs
+
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - benchmarl_mlp
+  - comm_identity
+  - comm_broadcast
+  - comm_gated
+  - comm_attention
+  - comm_graph
+seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+max_n_frames: 600000
+ablation: main
+
+overrides:
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.1
+  experiment.on_policy_n_minibatch_iters: 5
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_interval: 120000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2

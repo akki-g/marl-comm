@@ -2,6 +2,9 @@ import dataclasses
 from pathlib import Path
 
 import pytest
+import torch
+from tensordict import TensorDict
+from tensordict.nn.probabilistic import InteractionType, set_interaction_type
 
 from benchmarl.algorithms import MappoConfig
 from benchmarl.experiment import Experiment
@@ -152,3 +155,111 @@ def test_actors_are_parameter_matched(config_root, tmp_path):
         experiment.collector.shutdown()
 
     assert built["benchmarl_mlp"] == built["comm_identity"]
+
+
+def test_mlp_and_identity_remain_numerically_identical_after_bookkeeping(
+    config_root,
+    tmp_path,
+):
+    experiments = []
+    actors = []
+    for model in ("benchmarl_mlp", "comm_identity"):
+        spec = load_experiment_spec(
+            config_root,
+            [
+                f"model={model}",
+                "seed=17",
+                *SHORT_RUN_OVERRIDES,
+            ],
+        )
+        spec = dataclasses.replace(
+            spec,
+            experiment={
+                **spec.experiment,
+                "save_folder": str(tmp_path / model),
+            },
+        )
+        experiment = build_experiment(spec)
+        experiments.append(experiment)
+        actors.append(actor_models(experiment)[0])
+
+    try:
+        assert all(
+            torch.equal(left, right)
+            for left, right in zip(
+                actors[0].parameters(),
+                actors[1].parameters(),
+                strict=True,
+            )
+        )
+        observation_key = actors[0].in_keys[0]
+        observation_shape = actors[0].input_spec[observation_key].shape
+        observation = torch.randn(7, *observation_shape)
+        logits = []
+        actions = []
+        for experiment, actor in zip(experiments, actors, strict=True):
+            actor_td = TensorDict(
+                {observation_key: observation.clone()},
+                batch_size=[7],
+            )
+            actor(actor_td)
+            logits.append(actor_td.get(actor.out_key).detach().clone())
+
+            policy_td = TensorDict(
+                {observation_key: observation.clone()},
+                batch_size=[7],
+            )
+            with (
+                torch.no_grad(),
+                set_interaction_type(InteractionType.DETERMINISTIC),
+            ):
+                experiment.group_policies[GROUP](policy_td)
+            actions.append(policy_td.get((GROUP, "action")).clone())
+
+        assert torch.equal(logits[0], logits[1])
+        assert torch.equal(actions[0], actions[1])
+    finally:
+        for experiment in experiments:
+            experiment.collector.shutdown()
+            experiment.test_env.close()
+
+
+def test_build_experiment_creates_missing_save_parent(config_root, tmp_path):
+    missing_parent = tmp_path / "nested" / "benchmarl"
+    spec = load_experiment_spec(
+        config_root,
+        ["experiment.max_n_frames=6000", "experiment.evaluation=false"],
+    )
+    spec = dataclasses.replace(
+        spec,
+        experiment={**spec.experiment, "save_folder": str(missing_parent)},
+    )
+
+    experiment = build_experiment(spec)
+
+    assert missing_parent.is_dir()
+    experiment.collector.shutdown()
+    experiment.test_env.close()
+
+
+def test_policy_rejects_unreplayed_train_time_gaussian_noise(
+    config_root,
+    tmp_path,
+):
+    spec = load_experiment_spec(
+        config_root,
+        [
+            "model=comm_attention",
+            "model_config.params.comm_kwargs.channel.type=gaussian",
+            "model_config.params.comm_kwargs.channel.std=0.5",
+            "model_config.params.comm_kwargs.channel.mode=always",
+            "experiment.evaluation=false",
+        ],
+    )
+    spec = dataclasses.replace(
+        spec,
+        experiment={**spec.experiment, "save_folder": str(tmp_path)},
+    )
+
+    with pytest.raises(ValueError, match="not replay-safe"):
+        build_experiment(spec)

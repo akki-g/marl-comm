@@ -1,0 +1,32 @@
+# Selected V2 protocol, pending the all-seed MLP confirmation gate. Do not
+# launch this ablation until the gate and the V2 main comparison justify it.
+suite_id: simple_spread_comm_v2_stage3_rounds
+run_namespace: v2
+output_root: runs
+algorithm: mappo
+task: vmas_simple_spread
+models: [comm_attention, comm_graph]
+seeds: [0, 1, 2]
+max_n_frames: 600000
+overrides:
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.1
+  experiment.on_policy_n_minibatch_iters: 5
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_interval: 120000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
+
+runs:
+  - ablation: communication_rounds
+    ablation_value: 1
+    overrides:
+      model_config.params.comm_kwargs.rounds: 1
+  - ablation: communication_rounds
+    ablation_value: 2
+    overrides:
+      model_config.params.comm_kwargs.rounds: 2
+  - ablation: communication_rounds
+    ablation_value: 3
+    overrides:
+      model_config.params.comm_kwargs.rounds: 3

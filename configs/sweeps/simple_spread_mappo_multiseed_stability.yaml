@@ -1,0 +1,39 @@
+# Staged baseline-wide diagnostic only. The existing 600k main MLP rows at
+# gamma=0.9, entropy=0.01, and 10 minibatch iterations remain the controls and
+# must not be replaced or retried under this suite.
+suite_id: simple_spread_mappo_multiseed_stability
+output_root: runs
+
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - benchmarl_mlp
+seeds:
+  - 2
+  - 3
+  - 4
+max_n_frames: 360000
+ablation: multiseed_stability
+
+overrides:
+  experiment.gamma: 0.9
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_interval: 120000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
+
+runs:
+  - ablation_value: entropy0.1_iters10
+    overrides:
+      algorithm_config.params.entropy_coef: 0.1
+      experiment.on_policy_n_minibatch_iters: 10
+
+  - ablation_value: entropy0.1_iters5
+    overrides:
+      algorithm_config.params.entropy_coef: 0.1
+      experiment.on_policy_n_minibatch_iters: 5
+
+  - ablation_value: entropy0.01_iters5
+    overrides:
+      algorithm_config.params.entropy_coef: 0.01
+      experiment.on_policy_n_minibatch_iters: 5

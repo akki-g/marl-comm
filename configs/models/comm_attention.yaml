@@ -1,0 +1,26 @@
+model_type: communication
+
+params:
+  hidden_dim: 128
+  num_encoder_layers: 2
+
+  activation_class_path: torch.nn.Tanh
+
+  comm_class_path: commstudy.communication.attention.AttentionComm
+
+  comm_kwargs:
+    message_dim: 32
+    key_dim: 32
+    num_heads: 4
+    rounds: 1
+    temperature: 1.0
+    exclude_self: true
+    residual: true
+    sender_budget: null
+    sender_selection: attention
+    channel:
+      type: identity
+
+  comm_context_keys:
+    mask: comm_mask
+    sender_mask: comm_sender_mask

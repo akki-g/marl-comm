@@ -1,0 +1,23 @@
+suite_id: simple_spread_identity_pilot
+output_root: runs
+
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - comm_identity
+seeds:
+  - 0
+
+overrides:
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
+
+runs:
+  - ablation: training_budget
+    ablation_value: 120000
+    max_n_frames: 120000
+
+  - ablation: training_budget
+    ablation_value: 600000
+    max_n_frames: 600000

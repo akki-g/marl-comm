@@ -1,0 +1,20 @@
+model_type: communication
+
+params:
+  hidden_dim: 128
+  num_encoder_layers: 2
+
+  activation_class_path: torch.nn.Tanh
+
+  comm_class_path: commstudy.communication.broadcast.BroadcastComm
+
+  comm_kwargs:
+    message_dim: 32
+    exclude_self: true
+    residual: true
+    channel:
+      type: identity
+
+  comm_context_keys:
+    mask: comm_mask
+    sender_mask: comm_sender_mask

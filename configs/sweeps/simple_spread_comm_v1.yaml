@@ -1,0 +1,31 @@
+# The common MAPPO protocol was frozen uniformly after Identity calibration
+# and the 600k stability confirmation. Do not tune it per communication method.
+suite_id: simple_spread_comm_v1
+output_root: runs
+
+algorithm: mappo
+task: vmas_simple_spread
+models:
+  - benchmarl_mlp
+  - comm_identity
+  - comm_broadcast
+  - comm_gated
+  - comm_attention
+  - comm_graph
+seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+max_n_frames: 600000
+ablation: main
+
+overrides:
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.01
+  experiment.on_policy_n_minibatch_iters: 10
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_interval: 120000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
