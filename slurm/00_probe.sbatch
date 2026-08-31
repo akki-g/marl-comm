@@ -81,6 +81,37 @@ for mod in "${CANDIDATES[@]}"; do
 done
 module purge >/dev/null 2>&1
 
+banner "outbound network (needed to install packages)"
+# If this fails, packages must be installed from a login node.
+python3 -c '
+import socket, sys
+socket.setdefaulttimeout(10)
+for host in ("pypi.org", "download.pytorch.org"):
+    try:
+        socket.create_connection((host, 443)).close()
+        print(f"{host:28} reachable")
+    except OSError as error:
+        print(f"{host:28} UNREACHABLE ({error})")
+' 2>&1 || echo "could not run network check"
+
+banner "existing virtualenv"
+VENV="${COMMSTUDY_VENV:-${SLURM_SUBMIT_DIR:-$PWD}/.venv-newton}"
+if [[ ! -x "$VENV/bin/python" ]]; then
+  echo "$VENV -> does not exist (run 01_setup.sbatch)"
+else
+  echo "$VENV -> exists ($("$VENV/bin/python" -V 2>&1))"
+  # A venv that exists but cannot import the stack is the failure mode that
+  # otherwise kills every array task individually with an import traceback.
+  for pkg in torch benchmarl torchrl tensordict vmas; do
+    if version=$("$VENV/bin/python" -c "import $pkg; print(getattr($pkg,'__version__','?'))" 2>/dev/null); then
+      printf '  %-12s %s\n' "$pkg" "$version"
+    else
+      printf '  %-12s MISSING -- venv is incomplete\n' "$pkg"
+    fi
+  done
+  "$VENV/bin/python" -c 'import torch; print(f"  cuda available {torch.cuda.is_available()}")' 2>/dev/null || true
+fi
+
 banner "done"
 echo "Use a module marked USABLE above. Override the default with:"
 echo "  sbatch --export=ALL,COMMSTUDY_PYTHON_MODULE=<name> slurm/01_setup.sbatch"

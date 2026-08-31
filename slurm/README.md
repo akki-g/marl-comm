@@ -138,17 +138,36 @@ The module it settles on is written to `slurm/.resolved_env`, which the training
 jobs then source, so every job uses the interpreter setup actually verified
 rather than re-guessing.
 
-**Network or DNS errors during `pip install`.** Compute nodes may have no
-outbound internet. Install on a **login node**, then resubmit `01` to do the
-manifest half (it skips the venv if one already exists):
+**`No module named 'torch'`, or `cannot reach pypi.org`.** Compute nodes here
+have no outbound internet, so `pip` cannot run inside a job. `01_setup.sbatch`
+now detects this before building anything and stops with instructions rather
+than leaving a half-built venv behind.
+
+Install from a **login node**, then resubmit `01`. It detects the completed
+environment, skips the install, and just builds the manifests:
 
 ```bash
+cd ~/marl-comm
 module load python/python-3.11.4-gcc-12.2.0 cuda/cuda-12.4.0
-python3 -m venv ~/marl-comm/.venv-newton          # note: python3, not python
-source ~/marl-comm/.venv-newton/bin/activate
+python3 -m venv .venv-newton                      # note: python3, not python
+source .venv-newton/bin/activate
+pip install --upgrade pip wheel setuptools
 pip install --index-url https://download.pytorch.org/whl/cu124 'torch>=2.7'
 pip install -e '.[dev,analysis]'
 ```
+
+Verify before resubmitting — this must print versions, not a traceback:
+
+```bash
+python -c 'import torch, benchmarl, torchrl, tensordict, vmas; print(torch.__version__)'
+```
+
+`torch.cuda.is_available()` will be `False` on a login node with no GPU; that is
+expected. `01_setup.sbatch` checks it properly from a compute node.
+
+A venv that exists but is incomplete is now caught once, in `newton_env.sh`,
+with the remedy printed — instead of all 231 array tasks each dying inside an
+import traceback.
 
 **`virtualenv not found`** from `02`/`03`/`04` simply means `01` has not
 succeeded yet. Those jobs exit immediately without touching `runs/`, so a failed

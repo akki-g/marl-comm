@@ -95,12 +95,57 @@ if [[ -z "$PYTHON_BIN" ]]; then
   echo "Tried: ${PYTHON_MODULE_CANDIDATES[*]}" >&2
   echo >&2
   echo "What is actually available:" >&2
-  module avail python 2>&1 | head -40 >&2
-  module avail anaconda 2>&1 | head -20 >&2
+  # `|| true`: these are best-effort diagnostics on a failure path. Under
+  # `set -e -o pipefail` a failing `module avail` would abort before the
+  # instructions below ever print.
+  { module avail python 2>&1 | head -40 >&2; } || true
+  { module avail anaconda 2>&1 | head -20 >&2; } || true
   echo >&2
   echo "Then rerun with the correct name:" >&2
   echo "  sbatch --export=ALL,COMMSTUDY_PYTHON_MODULE=<name> slurm/01_setup.sbatch" >&2
   echo "Or run 'sbatch slurm/00_probe.sbatch' for a full report." >&2
+  exit 1
+fi
+
+# -------------------------------------------------------------- network check
+# Compute nodes on many clusters have no outbound internet. Detect that BEFORE
+# building anything, so the failure is one clear message instead of a half-built
+# venv that later makes all 231 array tasks die inside an import traceback.
+NEED_INSTALL=1
+if [[ -x "$VENV/bin/python" ]] \
+   && "$VENV/bin/python" -c 'import torch, benchmarl, torchrl, tensordict, vmas' 2>/dev/null; then
+  echo "[setup] existing virtualenv is already complete; skipping install"
+  NEED_INSTALL=0
+fi
+
+if [[ "$NEED_INSTALL" -eq 1 ]] \
+   && ! "$PYTHON_BIN" -c '
+import socket, sys
+socket.setdefaulttimeout(10)
+try:
+    socket.create_connection(("pypi.org", 443)).close()
+except OSError as error:
+    sys.exit(str(error) or "unreachable")
+' 2>/dev/null; then
+  cat >&2 <<EOF
+
+==============================================================
+ERROR: this compute node cannot reach pypi.org.
+
+Package installation must happen on a LOGIN node. Run:
+
+  cd $REPO_DIR
+  module load $PYTHON_MODULE $CUDA_MODULE
+  $PYTHON_BIN -m venv $VENV
+  source $VENV/bin/activate
+  pip install --upgrade pip wheel setuptools
+  pip install --index-url $TORCH_INDEX 'torch>=2.7'
+  pip install -e '.[dev,analysis]'
+
+Then resubmit this script. It will detect the completed
+environment, skip the install, and just build the manifests.
+==============================================================
+EOF
   exit 1
 fi
 
@@ -116,19 +161,14 @@ source "$VENV/bin/activate"
 # from here on -- unlike before activation.
 echo "[setup] venv python    $(command -v python) ($(python -V 2>&1))"
 
-echo "[setup] installing packages"
-echo "[setup] if this step fails with network/DNS errors, run on a LOGIN node:"
-echo "        module load $PYTHON_MODULE $CUDA_MODULE"
-echo "        source $VENV/bin/activate"
-echo "        pip install --index-url $TORCH_INDEX 'torch>=2.7'"
-echo "        pip install -e '.[dev,analysis]'"
-echo "        then resubmit this script to build the manifests."
-
-python -m pip install --upgrade pip wheel setuptools
-# Install the CUDA torch build first so benchmarl/torchrl cannot pull the CPU
-# wheel in as a transitive dependency.
-python -m pip install --index-url "$TORCH_INDEX" "torch>=2.7"
-python -m pip install -e ".[dev,analysis]"
+if [[ "$NEED_INSTALL" -eq 1 ]]; then
+  echo "[setup] installing packages"
+  python -m pip install --upgrade pip wheel setuptools
+  # Install the CUDA torch build first so benchmarl/torchrl cannot pull the CPU
+  # wheel in as a transitive dependency.
+  python -m pip install --index-url "$TORCH_INDEX" "torch>=2.7"
+  python -m pip install -e ".[dev,analysis]"
+fi
 
 # ------------------------------------------------------------- verify device
 echo "[setup] === verification ==="

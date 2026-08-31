@@ -182,6 +182,55 @@ def test_env_error_message_points_at_a_script_that_exists():
         assert name not in env, f"stale reference to deleted {name}"
 
 
+def test_env_guard_verifies_the_venv_works_not_just_that_it_exists():
+    """Regression: a half-built venv passed the old existence-only check.
+
+    When setup dies partway (typically pip failing on a network-isolated
+    compute node) the venv directory still exists. Every array task then sailed
+    past the guard and died separately inside an import traceback. The guard
+    must import the actual stack and fail once, with the remedy.
+    """
+
+    env = (SLURM / "newton_env.sh").read_text(encoding="utf-8")
+
+    assert "import torch, benchmarl, torchrl, tensordict, vmas" in env
+    assert "incomplete" in env
+    # The error must name the login-node remedy, not just report failure.
+    assert "LOGIN node" in env
+    assert "pip install" in env
+
+
+def test_setup_checks_network_before_building_anything():
+    """Fail fast on a network-isolated node instead of leaving a broken venv."""
+
+    setup = (SLURM / "01_setup.sbatch").read_text(encoding="utf-8")
+
+    assert "pypi.org" in setup
+    # The check must precede venv creation, or it cannot prevent the half-built
+    # state it exists to avoid.
+    assert setup.index("pypi.org") < setup.index("creating virtualenv")
+    assert "cannot reach pypi.org" in setup
+
+
+def test_setup_is_idempotent_when_the_environment_is_already_complete():
+    """Resubmitting after a login-node install must skip straight to manifests."""
+
+    setup = (SLURM / "01_setup.sbatch").read_text(encoding="utf-8")
+
+    assert "NEED_INSTALL" in setup
+    assert "already complete" in setup
+    assert 'if [[ "$NEED_INSTALL" -eq 1 ]]; then' in setup
+
+
+def test_probe_reports_venv_completeness_and_network():
+    probe = (SLURM / "00_probe.sbatch").read_text(encoding="utf-8")
+
+    assert "pypi.org" in probe
+    assert "MISSING" in probe
+    for package in ("torch", "benchmarl", "torchrl", "tensordict", "vmas"):
+        assert package in probe
+
+
 def test_probe_makes_no_changes():
     """The diagnostic must be safe to run at any time, including mid-study."""
 

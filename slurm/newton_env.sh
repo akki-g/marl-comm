@@ -63,6 +63,37 @@ fi
 # shellcheck disable=SC1091
 source "$COMMSTUDY_VENV/bin/activate"
 
+# A venv DIRECTORY existing is not the same as a venv that WORKS. If setup died
+# partway through -- most often because a compute node has no outbound network
+# and pip failed -- the directory is still there and every array task would sail
+# past a mere existence check and then die deep inside an import traceback.
+# Fail here instead, once, with the actual remedy.
+if ! python -c 'import torch, benchmarl, torchrl, tensordict, vmas' 2>/dev/null; then
+  {
+    echo "ERROR: the virtualenv at $COMMSTUDY_VENV is incomplete."
+    echo
+    echo "It exists but its packages are missing, so 01_setup.sbatch did not"
+    echo "finish. The usual cause is that compute nodes have no outbound"
+    echo "network, so pip could not reach PyPI."
+    echo
+    echo "Missing import:"
+    # `|| true` is essential: this import is EXPECTED to fail, and under
+    # `set -e -o pipefail` its failure would abort the block and swallow the
+    # remediation text below -- the only part of this message that helps.
+    python -c 'import torch, benchmarl, torchrl, tensordict, vmas' 2>&1 | tail -3 || true
+    echo
+    echo "Fix it from a LOGIN node (which does have network):"
+    echo "  cd $COMMSTUDY_REPO"
+    echo "  module load $COMMSTUDY_PYTHON_MODULE $COMMSTUDY_CUDA_MODULE"
+    echo "  source $COMMSTUDY_VENV/bin/activate"
+    echo "  pip install --index-url https://download.pytorch.org/whl/cu124 'torch>=2.7'"
+    echo "  pip install -e '.[dev,analysis]'"
+    echo
+    echo "Then resubmit:  sbatch slurm/01_setup.sbatch"
+  } >&2
+  exit 1
+fi
+
 cd "$COMMSTUDY_REPO"
 export PYTHONPATH="$COMMSTUDY_REPO/src:${PYTHONPATH:-}"
 
