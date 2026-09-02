@@ -1043,54 +1043,143 @@ numeric-ordered ablation sections, failed rows, and embedded figures.
 `uv run pytest -q` -> **331 passed**; Ruff, compileall, `bash -n` on all five
 shell scripts, and `git diff --check` pass.
 
-## Current execution state and resume point
+## STUDY COMPLETE (2026-09-02) — results, verdict, and resume point
 
-- V2 MLP gate: **complete and passed** on CPU, 5/5, 0 failed. The frozen
-  protocol above stands.
-- Stage 1 was partially executed locally and then abandoned for the cluster.
-  All five communication methods showed evaluation traces in the same
-  `-410 .. -690` band as the baselines before the switch, so no method is
-  failing to learn and the ablation budget is justified.
-- All eight V2 suites expand cleanly to **231 rows** (main 30, message_dim 48,
-  dropout 48, rounds 18, heads 24, graph topology 9, sender budget 36, self
-  communication 18), verified by `src/tests/test_slurm_scripts.py`, which pins
-  the sbatch array ranges to the expanded row counts.
-- Priority order if compute must be cut short: message_dim, dropout, rounds,
-  graph topology (the four required), then sender budget, then heads and self
-  communication.
+All eight V2 suites executed on Newton at commit `49b2ad43`. **231 planned rows,
+224 completed (97%), ~43.2 GPU-hours.** Consolidated write-up with full metric
+definitions and interpretation lives in
+**`docs/RESULTS_v2_simple_spread.md`**; per-suite artifacts in `results/*/`
+(gitignored, so keep the cluster copy).
 
-**Next agent starts here.** On Newton, from a fresh clone (do not copy `runs/`):
+### Verdict: READY TO IMPLEMENT PCP/PP, with one required fix
+
+Required before launching the new environments:
+
+1. **Comm-stack numerical instability: guards IMPLEMENTED (2026-09-02), not yet
+   validated at full scale.** See "Divergence root cause and the two guards"
+   below. Both default to off, so the completed suites reproduce exactly.
+2. **Keep `exclude_self=true` and keep saliency as a first-class metric.**
+   Enabling self-communication drops saliency to ~0 while leaving return
+   unchanged -- a silently non-communicating study that no return-based metric
+   detects.
+
+### Divergence root cause and the two guards
+
+The original diagnosis ("unnormalized residual stacking, fix with LayerNorm
+and/or gradient clipping") was right about the mechanism and too loose about the
+remedy. Measured on the diverging configuration:
+
+- The failure is a **forward-pass amplification**, not a gradient-magnitude
+  problem. Rounds share parameters and compose residually with no
+  normalization, so activation magnitude grows *multiplicatively with depth*.
+  Scaling the comm weights 100x gives activation norms of 1.3e3 / 1.3e5 / 1.4e7
+  at 1 / 2 / 3 rounds; at 1000x it reaches 1.4e13, which is the magnitude the
+  failed runs' `grad_norm_loss_objective` actually reported.
+- **Gradient clipping alone does not fix this.** BenchMARL trains with Adam,
+  whose per-parameter second-moment normalization makes updates largely
+  invariant to gradient scale. Injecting 1e6 gradient spikes into the diverging
+  configuration produced identical final weights with the clip off, at 100, at
+  10, and at 1.0. Clipping is a useful spike limiter and diagnostic, not the
+  remedy.
+- **`normalize_comm_path` is the remedy.** LayerNorm on the contribution makes
+  the output invariant to weight scale entirely (activation norm 36.1 at every
+  weight gain from 10x to 1000x, versus 1.4e13 unnormalized).
+- Why only attention and graph ever failed: broadcast and gated apply `tanh` to
+  their messages, which bounds the payload. Attention and graph do not.
+
+Both options live on `CommModule` and reach every module through
+`comm_kwargs`:
 
 ```bash
-cd ~/marl-comm
-sbatch slurm/01_setup.sbatch            # wait for this to finish
-sbatch slurm/02_main_comparison.sbatch  # 30 rows
-sbatch slurm/03_ablations.sbatch        # 201 rows
-sbatch slurm/04_analyze.sbatch          # or --dependency=afterany:<ids>
+# the guard that addresses the divergence
+model_config.params.comm_kwargs.normalize_comm_path=true
+# optional spike limiter; set it ABOVE the typical norm, not below
+model_config.params.comm_kwargs.grad_clip=10.0
 ```
 
-Then re-run the MLP protocol gate **on CUDA** before trusting cross-method
-comparisons, because the passed gate is CPU evidence and device changes
-numerics:
+Implementation notes that matter for interpreting future runs:
 
-```bash
-python scripts/audit_runs.py runs/simple_spread_comm_v2 --model benchmarl_mlp \
-  --out results/simple_spread_comm_v2/mlp_gate_audit.csv
-```
+- `normalize_comm_path` adds **exactly one parameter** (`comm_path_scale`, a
+  LayerScale-style scalar gain initialized to 0.01). It is not cosmetic:
+  normalizing to unit RMS alone destroys the modules' near-identity
+  initialization and moved the first-iteration return from -552 to -1361. With
+  the gain, the first iteration matches baseline (-551.5 vs -552.1).
+- Clipping is applied to the message-derived contribution, *not* the module
+  output, so the residual skip carrying the encoder's gradient is untouched.
+- The clip unit is one environment transition, so the threshold means the same
+  thing during rollout collection and during a PPO minibatch update.
+- Clipping leaves the forward pass bit-identical (it is a backward hook), so it
+  cannot perturb PPO replay or saliency. **Normalization does change the forward
+  pass**, so runs with it enabled are not comparable to the completed V2 suites.
+- New diagnostics surface through the existing stats pipeline as
+  `comm_grad_clip_fraction`, `comm_grad_clip_observed_max_norm`, and
+  `comm_comm_path_scale`. Calibrate `grad_clip` from the observed max norm
+  rather than guessing.
+- Covered by `src/tests/test_grad_clip.py` (78 tests, mutation-checked against
+  four wrong implementations: clip disabled, clip on the output instead of the
+  contribution, tensor-global instead of per-transition norm, and normalization
+  disabled).
 
-Expect all-finite metrics, entropy staying near 1, zero deterministic action
-saturation, and returns clustered near -430..-560. If CUDA reproduces that, the
-protocol transfers; if not, stop and diagnose before interpreting any
-communication row.
+**Still outstanding:** none of this has been validated on a full 600k-frame run.
+Re-run the 7 diverged cells (`message_dim=64`, `communication_rounds=2,3` for
+attention and graph) with `normalize_comm_path=true` and confirm they complete
+finite before trusting the guard at scale.
 
-Remaining scientific work is unchanged: Stage 1 comparison, the four required
-ablations plus sender budget, saliency across all methods, final aggregation,
-and the exact readiness verdict. PCP/PP stay untouched.
-- Each ablation suite deliberately re-runs its default point
-  (`message_dim=32`, `rounds=1`, `topology=full`, `heads=4`,
-  `exclude_self=true`) as a matched in-suite control. Those rows share seeds
-  0--2 with the main suite and should reproduce them, which doubles as a
-  reproducibility check.
+### CUDA MLP protocol gate: PASSED
+
+The gate the previous handoff demanded is satisfied by the main-suite audit
+(`results/simple_spread_comm_v2/simple_spread_comm_v2_run_audit.csv`), no
+separate run needed. All 5 CUDA MLP seeds: all-finite, entropy last 1.184-1.237,
+deterministic action saturation exactly 0.0000, returns -458.4 .. -501.8 (inside
+the required -430..-560 band). The V2 protocol transfers from CPU to CUDA.
+
+### Headline results
+
+- Communication helps but only by **+6 to +12 return points on a -474 baseline
+  (1.3-2.5%)**, matched-seed, all CIs excluding zero, dz 1.45-3.95.
+- **Broadcast wins** on final return and AUC at *half* the bandwidth and comm
+  parameters of attention/graph.
+- Attention converged to **99.6% of uniform** (entropy 0.6905 vs ln2 = 0.6931),
+  i.e. it rediscovered mean-pooling at 2x the cost. Head count 1-8 has no effect.
+  Expected: Simple Spread is fully observable (`obs_agents: True`), so no sender
+  is more informative than another and there is no selection problem to solve.
+- **Learned top-1 sender selection matches full communication at 1/3 the
+  bandwidth** (-466.0 vs -468.4); random top-1 at the same bandwidth is 10.5
+  points worse and nearly non-salient. The soft weights are flat but the
+  *ranking* is informative -- the one transferable win for attention.
+- **Multi-round communication is a hard failure**: rounds=3 gives -785 to -807
+  with *negative* saliency (severing comm helps by 158-325 points).
+- Channel dropout p=0.25 improves AUC substantially (-556 -> -519) and yields the
+  highest saliency of any setting, at 25% lower bandwidth.
+
+### Reproducibility check: PASSED
+
+The intended duplicate-baseline check (each ablation suite re-runs its default
+point as a matched in-suite control) worked. Twelve configurations reached from
+different ablation axes agree **to 13 significant figures across up to 8
+independently scheduled Slurm jobs**. This also shows the "mixed GPU models"
+warning in every report is a false positive here: the two models are V100-PCIE
+16GB and 32GB, the same `sm_70` architecture differing only in memory.
+
+### Known caveats carried forward
+
+- Learning curves are **still rising at 600k frames** -- these are fixed-budget
+  rankings, not asymptotic ones.
+- Critic **explained variance is ~0.02** (median over 30 runs). Plausible for
+  gamma=0.9 on this task, but the value signal is weak and contributes to the
+  small effect sizes. Revisit gamma for PP/PCP, which have longer horizons.
+- Ablations used 3 seeds; several ablation CIs span 30+ return points.
+- The `switch to h100` commit did not take effect -- everything ran on V100s.
+  Harmless here (see reproducibility above) but fix the submission before
+  generating numbers to compare against these.
+
+### Suggested first move in the new phase
+
+Port `identity` and `broadcast` only, run the matched-seed protocol gate on PP,
+and check that **saliency is materially larger than the ~32 points seen here**.
+If communication still contributes only ~6% of return under partial
+observability, the problem is the protocol, not the mechanisms -- and that is
+much cheaper to learn from two modules than from five plus a full ablation grid.
 
 ## Historical resume point (superseded by the section above)
 

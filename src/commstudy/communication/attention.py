@@ -320,7 +320,11 @@ class AttentionComm(CommModule):
             aggregated = aggregated.reshape(
                 *result.shape[:-2], n_agents, self.message_dim
             )
-            update = self.output_projection(aggregated)
+            # Clipped per round: with shared parameters across rounds, a later
+            # round's gradient also flows back through every earlier round, so
+            # bounding each contribution is what actually caps the compounding
+            # that made rounds >= 2 diverge.
+            update = self._stabilize_comm_path(self.output_projection(aggregated))
             result = result + update if self.residual else update
 
             stats_by_round.append(

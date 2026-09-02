@@ -376,7 +376,9 @@ class GraphComm(CommModule):
             aggregated = aggregated.reshape(
                 *result.shape[:-2], n_agents, self.message_dim
             )
-            update = self.output_projection(aggregated)
+            # Clipped per round, as in AttentionComm: shared round parameters
+            # mean a later round's gradient also flows through earlier ones.
+            update = self._stabilize_comm_path(self.output_projection(aggregated))
             result = result + update if self.residual else update
 
             stats_by_round.append(

@@ -20,6 +20,40 @@ params:
     channel:
       type: identity
 
+    # Max L2 norm of the gradient flowing back through the communication path,
+    # per environment transition. null disables it, which is the frozen-protocol
+    # default the completed V2 suites ran under -- do not change it globally
+    # without re-running the study.
+    #
+    # This is a SPIKE limiter, not the fix for the observed divergence: BenchMARL
+    # trains with Adam, whose second-moment normalization makes updates largely
+    # invariant to gradient scale, so a clip that fires every step does almost
+    # nothing. Set it above the typical norm (read comm_grad_clip_observed_max_norm
+    # from a short run) so it only catches outliers, then confirm
+    # comm_grad_clip_fraction stays small. See normalize_comm_path below for the
+    # guard that actually addresses the divergence.
+    #   model_config.params.comm_kwargs.grad_clip=10.0
+    grad_clip: null
+
+    # LayerNorm on the communication contribution before the residual add,
+    # followed by one learned scalar gain (comm_path_scale, init 0.01).
+    #
+    # THIS is the guard for the observed divergence, not grad_clip above. Rounds
+    # share parameters and compose residually, so the forward pass amplifies
+    # multiplicatively with depth: measured 1.3e3 / 1.3e5 / 1.4e7 at 1/2/3 rounds
+    # under a 100x weight scale, reaching 1e13 -- the magnitude the failed runs
+    # actually hit. Normalizing makes the output invariant to weight scale.
+    #
+    # The scalar gain matters: unit RMS alone starts communication loud and
+    # destroys the modules' near-identity init (first-iteration return went
+    # -552 -> -1361 without it). It adds exactly one parameter, so comm_params
+    # rises by 1. Log comm_comm_path_scale to see communication's influence grow.
+    #
+    # This changes the forward pass, so runs with it enabled are NOT comparable
+    # to the completed V2 suites:
+    #   model_config.params.comm_kwargs.normalize_comm_path=true
+    normalize_comm_path: false
+
   comm_context_keys:
     mask: comm_mask
     sender_mask: comm_sender_mask

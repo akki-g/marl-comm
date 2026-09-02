@@ -80,7 +80,7 @@ class BroadcastComm(CommModule):
         )
 
         aggregated = masked_sender_mean(channel_output.messages, effective_edges)
-        delta = self.message_decoder(aggregated)
+        delta = self._stabilize_comm_path(self.message_decoder(aggregated))
         output = h + delta if self.residual else delta
 
         message_norm = torch.linalg.vector_norm(channel_output.messages, dim=-1)

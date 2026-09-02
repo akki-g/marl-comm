@@ -143,7 +143,7 @@ class GatedComm(CommModule):
         available_edges = sender_mask_to_edge_mask(budget_mask, base_edges)
 
         aggregated = masked_sender_mean(sent_messages, available_edges)
-        delta = self.message_decoder(aggregated)
+        delta = self._stabilize_comm_path(self.message_decoder(aggregated))
         output = h + delta if self.residual else delta
 
         learned_gate = torch.sigmoid(gate_logits).squeeze(-1)
