@@ -29,6 +29,9 @@ class CommPolicyConfig(ModelConfig):
         }
     )
 
+    use_role_embedding: bool = False
+    num_roles: int = 2 
+
     @staticmethod
     def associated_class():
         return CommPolicyModel

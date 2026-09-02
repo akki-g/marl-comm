@@ -24,6 +24,7 @@ from .utils import (
     resolve_comm_mask,
     sender_mask_to_edge_mask,
     validate_comm_input,
+    pairwise_class_bias,
 )
 
 
@@ -56,6 +57,8 @@ class AttentionComm(CommModule):
         sender_selection: str = "attention",
         sender_selection_seed: int = 0,
         store_debug_attention: bool = False,
+        role_aware: bool = False,
+        num_roles: int = 2,
         **kwargs: Any,
     ) -> None:
         super().__init__(hidden_dim=hidden_dim, **kwargs)
@@ -92,6 +95,17 @@ class AttentionComm(CommModule):
         self._reset_parameters()
         self._debug_attention: torch.Tensor | None = None
         self._random_priority_cache: dict[int, torch.Tensor] = {}
+
+        self.num_roles = int(num_roles)
+        if role_aware and self.num_roles < 1:
+            raise ValueError("num_roles must be >= 1")
+
+        self.register_parameter(
+            "class_bias",
+            nn.Parameter(torch.zeros(self.num_roles, self.num_roles, num_heads))
+            if role_aware
+            else None,
+        )
 
     @staticmethod
     def _validate_configuration(
@@ -275,6 +289,16 @@ class AttentionComm(CommModule):
         costs_by_round: list[dict[str, torch.Tensor]] = []
         round_sender_mask = explicit_sender_mask
 
+        pair_bias = (
+            pairwise_class_bias(
+                self.class_bias,
+                context.class_id if context is not None else None,
+                self.__class__.__name__,
+            )
+            if self.class_bias is not None
+            else None
+        )
+
         for _ in range(self.rounds):
             queries = self.query_projection(result)
             sender_packet = torch.cat(
@@ -299,7 +323,8 @@ class AttentionComm(CommModule):
             )
             scores = (queries.unsqueeze(-3) * keys.unsqueeze(-4)).sum(dim=-1)
             scores = scores / (math.sqrt(key_head_dim) * self.temperature)
-
+            if pair_bias is not None:
+                scores = scores + pair_bias
             active_edge_mask = sender_mask_to_edge_mask(
                 channel_output.sender_mask, base_edge_mask
             )

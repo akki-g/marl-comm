@@ -24,6 +24,7 @@ from .utils import (
     resolve_comm_mask,
     sender_mask_to_edge_mask,
     validate_comm_input,
+    pairwise_class_bias,
 )
 
 
@@ -59,6 +60,8 @@ class GraphComm(CommModule):
         sender_selection: str = "attention",
         sender_selection_seed: int = 0,
         store_debug_attention: bool = False,
+        num_roles: int = 2,
+        role_aware: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(hidden_dim=hidden_dim, **kwargs)
@@ -107,6 +110,18 @@ class GraphComm(CommModule):
         self._debug_attention: torch.Tensor | None = None
         self._topology_cache: dict[int, torch.Tensor] = {}
         self._random_priority_cache: dict[int, torch.Tensor] = {}
+
+
+        self.num_roles = int(num_roles)
+        if role_aware and self.num_roles < 1:
+            raise ValueError("num_roles must be >= 1")
+        
+        self.register_parameter(
+            "class_bias",
+            nn.Parameter(torch.zeros(self.num_roles, self.num_roles, num_heads))
+            if role_aware
+            else None,
+        )
 
     @classmethod
     def _validate_configuration(
@@ -328,6 +343,16 @@ class GraphComm(CommModule):
         costs_by_round: list[dict[str, torch.Tensor]] = []
         round_sender_mask = explicit_sender_mask
 
+        pair_bias = (
+            pairwise_class_bias(
+                self.class_bias,
+                context.class_id if context is not None else None,
+                self.__class__.__name__,
+            )
+            if self.class_bias is not None
+            else None
+        )
+
         for _ in range(self.rounds):
             receiver_features = self.receiver_projection(result)
             sender_packet = torch.cat(
@@ -355,7 +380,9 @@ class GraphComm(CommModule):
                 negative_slope=self.negative_slope,
             )
             scores = (relations * self.relation_vector).sum(dim=-1) / self.temperature
-
+            if pair_bias is not None:
+                scores = scores + pair_bias
+            
             active_edge_mask = sender_mask_to_edge_mask(
                 channel_output.sender_mask, base_edge_mask
             )

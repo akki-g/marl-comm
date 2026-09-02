@@ -304,3 +304,22 @@ def communication_costs_for_round(
             nominal_deliveries * scalar_width * bits_per_scalar
         ),
     }
+
+def pairwise_class_bias(
+    class_bias: torch.Tensor,
+    class_id: torch.Tensor | None,
+    module_name: str,
+) -> torch.Tensor:
+    """Expand ``[num_roles, num_roles, num_heads]`` to ``[..., N, N, num_heads]``.
+
+    Indexed ``[receiver_class, sender_class]`` to match the score layout
+    ``[..., receiver, sender, head]``.
+    """
+
+    if class_id is None:
+        raise ValueError(
+            f"{module_name} was built with role_aware=True but the CommContext "
+            "carried no class_id."
+        )
+    cid = class_id.long()
+    return class_bias[cid.unsqueeze(-1), cid.unsqueeze(-2)]

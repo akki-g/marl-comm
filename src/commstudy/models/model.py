@@ -34,6 +34,8 @@ class CommPolicyModel(Model):
         comm_class_path: str,
         comm_kwargs: dict | None = None,
         comm_context_keys: dict | None = None,
+        use_role_embedding: bool = False,
+        num_roles: int = 2,
         **kwargs,
     ):
         agent_group = kwargs.get("agent_group")
@@ -85,6 +87,22 @@ class CommPolicyModel(Model):
             hidden_dim=hidden_dim,
             output_dim=self.output_features,
         )
+
+        self.num_roles = int(num_roles)
+        if use_role_embedding: 
+            if "class_id" not in self.comm_context_keys:
+                raise ValueError(
+                    "use_role_embedding requires a 'class_id' entry in "
+                    "comm_context_keys."
+                )
+            if self.num_roles < 1:
+                raise ValueError("num_roles must be <= 1")
+        self.role_emb = (
+            nn.Embedding(self.num_roles, hidden_dim) if use_role_embedding else None
+        )
+        if self.role_emb is not None:
+            nn.init.zeros_(self.role_emb.weight)
+        self._role_range_checked = False
 
         comm_class = import_from_path(comm_class_path)
 
@@ -371,6 +389,27 @@ class CommPolicyModel(Model):
             extras=values,
         )
 
+    def _role_features(self, context: CommContext) -> torch.Tensor:
+        class_id = context.class_id
+        if class_id is None:
+            raise ValueError(
+                "use_role_embedding is enabled but no class_id leaf was found "
+                f"at {self.comm_context_keys['class_id']}."
+            )
+        class_id = class_id.long()
+
+        if not self._role_range_checked:
+            # One-off. A per-step min/max on CUDA forces a device sync.
+            lo, hi = int(class_id.min()), int(class_id.max())
+            if lo < 0 or hi >= self.num_roles:
+                raise ValueError(
+                    f"class_id values must lie in [0, {self.num_roles}); "
+                    f"observed [{lo}, {hi}]."
+                )
+            self._role_range_checked = True
+
+        return self.role_emb(class_id)
+
     def _generated_sender_mask_key(self) -> str | tuple[str, ...] | None:
         key = self.comm_context_keys.get("sender_mask")
         if key is None:
@@ -442,6 +481,9 @@ class CommPolicyModel(Model):
             tensordict,
             context,
         )
+
+        if self.role_emb is not None:
+            h = h + self._role_features(context)
 
         output = self._apply_agent_modules(
             h, 
