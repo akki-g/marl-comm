@@ -1365,3 +1365,205 @@ saliency on a 12k `pcp_comm_broadcast` row is 0.0 in both arms while
 cannot see it) and the uncalibrated PCP training budget. Note that
 `scripts/saliency.py --episodes` does not control the episode count on a batched
 evaluation environment; `experiment.evaluation_episodes` does.
+
+## Session handoff (2026-09-03): PCP is launch-ready for the pilot only
+
+Read the two sections above first for the evidence; this one is the operating
+instruction. Nothing has been run on the cluster yet.
+
+### State
+
+PCP is fully integrated and every quality gate is green: **501 tests**, Ruff,
+compileall, `bash -n` on all ten sbatch scripts, `git diff --check`. Everything
+in this session is uncommitted.
+
+Added this session: the `num_landmarks` config fix, five `pcp_comm_*` model
+configs, nine `pcp_*` sweeps, five `slurm/pcp_0*.sbatch` scripts,
+`src/commstudy/experiments/returns.py`, and three test files
+(`test_pcp_integration.py`, `test_returns.py`, plus additions to
+`test_slurm_scripts.py`, `test_analysis.py`, `test_saliency.py`).
+
+Verified by running, not by reading: all six PCP model configs train; the
+communication modules see three adversaries (`comm_active_edges_per_step 6.0`);
+the study return now matches BenchMARL's per-group scalars exactly on both
+tasks; Simple Spread is bit-identical to its completed V2 numbers.
+
+### The only thing to submit now
+
+```bash
+sbatch slurm/01_setup.sbatch        # once, if .venv-newton does not exist yet
+sbatch slurm/pcp_01_setup.sbatch    # writes the three PCP manifests
+sbatch slurm/pcp_02_pilot.sbatch    # 2 rows, ~2 minutes of compute each
+sbatch slurm/pcp_05_analyze.sbatch  # after the pilot finishes
+```
+
+`pcp_03_main_comparison.sbatch` (30 rows) and `pcp_04_ablations.sbatch` (201
+rows) are written, tested, and **must not be submitted until the pilot is
+read**. Their headers say so and explain why.
+
+The pilot is two `pcp_comm_identity` rows, seed 0, at 60,000 and 120,000 frames,
+under exactly the optimizer protocol `pcp_comm_main` uses (gamma 0.9, entropy
+0.1, five minibatch iterations). It was corrected on 2026-09-03 to share that
+protocol: it had inherited the Simple Spread pilot's pre-frozen settings
+(gamma 0.99, entropy 0.0, ten iterations), which would have answered the budget
+question for a configuration no PCP suite runs.
+`test_pilot_shares_the_main_comparisons_optimizer_protocol` now pins this.
+
+### How to read the pilot
+
+```text
+results/pcp_identity_pilot/REPORT.md
+results/pcp_identity_pilot/pcp_identity_pilot_per_run.csv
+runs/pcp_identity_pilot/<run_id>/metrics.csv
+```
+
+The reported return is the predators' own. Reference points measured locally on
+this exact scenario:
+
+| Quantity | Value | Source |
+|---|---|---|
+| adversary episode return, uniformly random policy | ~1.5 | direct 20-env rollout |
+| adversary collection return, 30k-frame MLP row | 0.67 - 1.5, flat | local run |
+| adversary evaluation return, deterministic, <= 60k frames | 0.0 at every point | local runs |
+| prey return | exactly the negative of the predators' | simple_tag is zero-sum |
+
+`metrics.csv` carries `return_mean` three times per point: ungrouped (the study
+figure), `group=adversary`, and `group=agent`. The ungrouped row is the one the
+analysis reads.
+
+Saliency is exactly 0.0 for this pilot **by design** -- it runs
+`pcp_comm_identity`, the no-communication control. That is the wiring-check
+value, not a finding. Do not confuse it with the sparse-signal problem below.
+
+### The decision the pilot exists to make
+
+Compare the 60k and 120k rows on adversary return:
+
+- **Rising, and above ~1.5**: the predators are learning. Pick a budget from the
+  slope and launch `pcp_03`. A 600,000-frame row costs ~12 minutes on one core,
+  so the whole 231-row study is ~45 core-hours; compute is not the constraint
+  and never was.
+- **Flat near ~1.5**: the policy is at chance. Do not launch 231 rows. The
+  candidate causes, in the order worth testing, are below.
+- **Deterministic evaluation still 0.0 while collection is non-zero**: the
+  outcome metric cannot see the policy at all. Fix the measurement before
+  spending any comparison rows -- a six-way comparison of zeros is worthless
+  however many seeds it has.
+
+### Open questions, in priority order
+
+1. **Sparse capture reward.** `simple_tag` gives the adversaries `+10` only on
+   contact (`shape_adversary_rew: false`). Enabling shaping gives a dense
+   distance signal and is the standard remedy; it changes what the task rewards,
+   so it is a study-design decision, not a fix to apply silently.
+2. **Five evaluation episodes.** The evaluation environment is batched, so the
+   episode count comes from `experiment.evaluation_episodes`, *not* from
+   `scripts/saliency.py --episodes`. A rare-event outcome measured with five
+   samples has almost no power. Raising it costs very little here.
+3. **gamma 0.9 carried over untested.** ~10-step effective horizon against a
+   sparse capture reward is a different proposition than against Simple Spread's
+   dense coverage cost. The Simple Spread history (a three-run, 240k diagnostic
+   isolating gamma and entropy) is the template if this needs its own answer.
+4. **Budget never calibrated.** 60,000 frames is ten PPO update rounds and five
+   evaluation points, so the final-10% statistic is a single point.
+
+Whichever of these changes, update the suite YAMLs, rerun
+`sbatch slurm/pcp_01_setup.sbatch` to rebuild the manifests, and re-read the
+pilot before the main comparison. Also still deferred, deliberately:
+role/class-id conditioning on PCP (no data source; see the section above).
+
+## Pilot returned: PCP is blocked on the environment, not the config (2026-09-03)
+
+`sbatch slurm/pcp_02_pilot.sbatch` ran as array 793465 on one V100. Both rows
+completed. Full analysis in **`docs/RESULTS_pcp_pilot.md`**; read that before
+touching any PCP sweep. Summary of what changed in this repo's understanding:
+
+**The pilot's own question is answered.** Something does learn: collection
+return rises 1.52 -> 2.50 across the 120k run (Welch p = 0.036) against a
+measured random-policy baseline of 0.83, with slope +1.75 per 100k frames and
+no plateau. Throughput is 255 frames/s including evaluation, so 600k-1M frames
+is 39-65 min per identity row. Budget is not the binding constraint.
+
+**Open question 4 is answered:** 120k frames is ~1/10 of what the task needs.
+120k = 20 iterations x 10 minibatch epochs = 200 optimizer steps at lr 5e-5;
+policy entropy moved 1.304 -> 1.146 and ESS stayed at 0.99 the whole run.
+
+**Open question 3 is answered, and the answer is against `pcp_comm_main`.** The
+prey's `max_speed` is 1.3 against the predators' 1.0, so a one-predator chase
+never converges and capture needs a pincer. gamma = 0.9 discounts a reward 20
+steps out to 0.12; gamma = 0.99 leaves it at 0.82. The pilot learned *because*
+it accidentally ran gamma = 0.99 -- the alignment edit to
+`configs/sweeps/pcp_identity_pilot.yaml` was never committed and the cluster
+pulled `3bb11aa` without it, so the pilot ran gamma 0.99 / entropy 0.0 /
+10 minibatch iters while `pcp_comm_main` still specifies 0.9 / 0.1 / 5.
+
+**Open question 2 is quantified.** Over 300 random episodes: mean 0.833, std
+3.789, and 94% of episodes score exactly zero. At the current
+`evaluation_episodes: 5` the standard error is 1.69 -- larger than the whole
+effect being measured. n=128 brings it to 0.34 and is nearly free: BenchMARL
+passes `evaluation_episodes` to the eval env's `num_envs`
+(`benchmarl/experiment/experiment.py:449`) and does one batched rollout
+(`:932`), so a wider batch runs the same 100 sequential steps.
+
+**A new blocker outranks all four.** `PredatorCapturePreyScenario` overrides
+`process_action` only and inherits `observation()` from stock `simple_tag`, so
+each predator's 16-dim observation already contains the prey's relative position
+*and* velocity plus both teammates' positions. The task is **fully observable
+with homogeneous predators** -- structurally the same condition that produced
+the Simple Spread null. `docs/RESULTS_v2_simple_spread.md:400` justified moving
+to PCP on the promise of partial observability and heterogeneous roles; neither
+was ever implemented, and `README.md:174` / the section above already record the
+role split as deferred. Running 231 ablation rows before fixing this reproduces
+the Simple Spread null at higher cost.
+
+**Fixed in this session.** `summarize_metrics_csv` in
+`experiments/bookkeeping.py` averaged every evaluation `return_mean` row
+regardless of group. PCP writes three per evaluation (the ungrouped study figure
+plus one per group) and its groups are zero-sum, so `summary.json` reported
+`x/3`: the 120k row's true `mean_final_return` is **7.00**, not the 2.33 it
+printed. `analysis/aggregate.py` already filtered by group, so `results/` was
+never affected and Simple Spread is bit-identical after the fix. Pinned by
+`test_summary_ignores_per_group_returns_on_a_two_group_task`; 503 tests pass.
+
+**Do not submit `pcp_03_main_comparison` or `pcp_04_ablations`.** Gates A and B
+are now implemented, C is configured but not run, D is blocked on C.
+
+**Gate A (done).** `PredatorCapturePreyScenario.observation` now honours a
+`predator_sensing_radius`: past that distance a predator's view of the prey's
+position *and* velocity is zeroed and a visibility flag is appended, taking the
+predator observation to 17 dims. Predators still see each other, so the only
+thing a message can carry that its receiver lacks is where the prey is -- and
+which predators can answer that changes step to step, which is the dynamic
+sender relevance Simple Spread could not pose. The masked block is located by
+counting prey, not by a hardcoded index, and is verified bit-identical to the
+stock observation where visible. `configs/tasks/vmas_predator_capture_prey.yaml`
+sets **1.0**, calibrated against the random-policy geometry (mean distance
+1.08): the team is blind 14% of steps, exactly one of three predators sees the
+prey 41% of the time -- the modal case -- and all three see it only 10%. R = 0.6
+was the first guess and is too harsh (nobody sees the prey 58% of the time, and
+information no one holds cannot be communicated). The scenario default stays
+`None`, so stock behaviour is still reachable and the pilot stays reproducible.
+**Nothing measured before 2026-09-03 is comparable to a post-Gate-A row**,
+including the 0.83 random baseline.
+
+**Gate B (done).** `experiment.evaluation_episodes: 128` on all eight
+`pcp_comm_*.yaml` and on the protocol gate. Measured, not assumed: 5 -> 128
+episodes costs **+24% evaluation wall-clock for 25x the samples** (0.99s ->
+1.23s), taking the standard error from 1.69 to 0.34. Pinned by a test.
+
+**Gate C (configured, not run).** `configs/sweeps/pcp_protocol_gate.yaml` and
+`slurm/pcp_02b_protocol.sbatch`: the control at gamma x entropy_coef, 3 x 3,
+three seeds, 600k frames -- 27 rows, ~18 GPU-hours, under a tenth of the
+comparison it protects. This supersedes `pcp_02_pilot`, whose question is
+answered. Read off the winning cell *and* where its curve flattens; that frame
+count, not 600k, is what the comparison sweeps should carry.
+
+**Gate D (blocked).** All eight `pcp_comm_*.yaml` carry a `BLOCKED` header
+naming the three placeholders the gate decides -- `max_n_frames` 60000, gamma
+0.9, `entropy_coef` 0.1 -- and a test asserts the header is present. Take all
+three from the winner, delete the header, rerun `pcp_01_setup`, then submit
+step 3. Gate the 201 ablation rows on whether the 30-row main comparison
+separates the mechanisms at all.
+
+    sbatch slurm/pcp_01_setup.sbatch       # rebuilds manifests, incl. the gate
+    sbatch slurm/pcp_02b_protocol.sbatch   # 27 rows  <- READ THIS FIRST

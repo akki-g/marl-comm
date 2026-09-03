@@ -22,7 +22,8 @@
 # only ever read them and never race to create them.
 #
 # Manifests written:
-#   runs/pcp_identity_pilot/manifest.csv         2 rows   (pilot)
+#   runs/pcp_identity_pilot/manifest.csv         2 rows   (pilot, superseded)
+#   runs/pcp_protocol_gate/manifest.csv         27 rows   (protocol gate)
 #   runs/pcp_comm_main/manifest.csv             30 rows   (main comparison)
 #   runs/_manifests/pcp_ablations.csv          201 rows   (seven ablations)
 
@@ -56,6 +57,7 @@ echo "[pcp-setup] === building manifests ==="
 
 echo "[pcp-setup] pilot"
 python scripts/sweep.py configs/sweeps/pcp_identity_pilot.yaml | tail -2
+python scripts/sweep.py configs/sweeps/pcp_protocol_gate.yaml | tail -2
 
 echo "[pcp-setup] main comparison"
 python scripts/sweep.py configs/sweeps/pcp_comm_main.yaml | tail -2
@@ -74,7 +76,8 @@ python scripts/sweep.py \
 echo
 echo "=============================================================="
 echo "PCP setup complete. Next:"
-echo "  sbatch slurm/pcp_02_pilot.sbatch            # 2 rows  -- READ THIS FIRST"
+echo "  sbatch slurm/pcp_02b_protocol.sbatch        # 27 rows -- READ THIS FIRST"
+echo "  (pcp_02_pilot.sbatch is superseded; see docs/RESULTS_pcp_pilot.md)"
 echo "  sbatch slurm/pcp_03_main_comparison.sbatch  # 30 rows"
 echo "  sbatch slurm/pcp_04_ablations.sbatch        # 201 rows"
 echo

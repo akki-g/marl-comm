@@ -17,6 +17,7 @@ from commstudy.experiments.bookkeeping import (
     capture_git_state,
     make_run_id,
     retry_context,
+    summarize_metrics_csv,
 )
 from commstudy.experiments.metrics import TidyMetricsWriter
 from commstudy.experiments import load_experiment_spec
@@ -153,3 +154,47 @@ def test_tidy_metrics_has_stable_long_schema(tmp_path):
         rows = list(csv.DictReader(file))
     assert [row["metric"] for row in rows] == ["loss_objective", "entropy"]
     assert all(row["frames"] == "6000" for row in rows)
+
+
+def test_summary_ignores_per_group_returns_on_a_two_group_task(tmp_path):
+    """The run summary must read the ungrouped study figure, not average it
+    with the per-group scalars logged beside it.
+
+    PCP logs three ``return_mean`` rows per evaluation: the study figure (no
+    group) plus one per BenchMARL group, and its two groups are exactly
+    zero-sum. Averaging all three divides the predators' return by three, which
+    is how the first pilot reported 2.33 for a run that scored 7.0. A one-group
+    task cannot catch this -- there the extra row equals the study figure.
+    """
+    writer = TidyMetricsWriter(tmp_path)
+    for index in range(10):
+        frames = (index + 1) * 6_000
+        predator = float(index)
+        writer.write(
+            frames=frames, iteration=index, phase="evaluation",
+            metrics={"return_mean": predator},
+        )
+        writer.write(
+            frames=frames, iteration=index, phase="evaluation",
+            metrics={"return_mean": predator}, group="adversary",
+        )
+        writer.write(
+            frames=frames, iteration=index, phase="evaluation",
+            metrics={"return_mean": -predator}, group="agent",
+        )
+
+    summary = summarize_metrics_csv(tmp_path / "metrics.csv")
+
+    assert summary["evaluation_points"] == 10
+    assert summary["mean_final_return"] == pytest.approx(9.0)
+    assert summary["mean_final_return"] == pytest.approx(
+        compute_run_result_curve_final(tmp_path)
+    )
+
+
+def compute_run_result_curve_final(run_dir: Path) -> float:
+    """The analysis path's own answer, so the two stay pinned together."""
+    from commstudy.analysis.aggregate import _evaluation_curve, _metric_rows
+
+    curve = _evaluation_curve(_metric_rows(run_dir / "metrics.csv"))
+    return curve[-1][1]

@@ -27,6 +27,7 @@ dependencies = [
     # explicit dependency rather than a transitive BenchMARL one.
     "omegaconf>=2.3",
     "hydra-core>=1.3",
+    "mapdn",
 ]
 
 [project.optional-dependencies]
@@ -83,3 +84,6 @@ src = ["src", "scripts"]
 # BenchMARL imports separately from torch/tensordict on purpose. Run
 # `ruff check --select I --fix` if that convention is ever dropped.
 select = ["E", "F", "UP", "B"]
+
+[tool.uv.sources]
+mapdn = { git = "https://github.com/akki-g/MAPDN.git" }

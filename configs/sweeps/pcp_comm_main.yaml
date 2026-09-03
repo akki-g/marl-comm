@@ -3,11 +3,20 @@
 # protocol, copied unchanged so the only deliberate differences from that study
 # are the task and the training budget.
 #
-# max_n_frames is 60,000 rather than 600,000: PCP has no stability gate of its
-# own yet, so this is a cheap first pass, not a calibrated horizon. At this
-# budget the 12,000-frame evaluation interval leaves five evaluation points, so
-# the final-10% statistic reduces to a single point.
-# TODO: recalibrate once a stability gate exists for PCP.
+# BLOCKED: do not submit this suite yet. Three settings below are placeholders
+# that the 2026-09-03 pilot showed to be wrong, and all three are decided by
+# configs/sweeps/pcp_protocol_gate.yaml. See docs/RESULTS_pcp_pilot.md.
+#
+#   max_n_frames 60000  is roughly a tenth of what the task needs. The pilot's
+#                       return was still climbing at +1.75 per 100k frames with
+#                       no plateau; 600k is a floor, not an estimate.
+#   gamma 0.9           inherited untested from Simple Spread. The prey is
+#                       faster than the predators, so a capture needs a pincer
+#                       that gamma 0.9's ~10-step horizon cannot see.
+#   entropy_coef 0.1    never measured against this reward, which is sparse
+#                       enough that 94% of random episodes score exactly zero.
+#
+# Take all three from the protocol gate's winner, then delete this block.
 suite_id: pcp_comm_main
 run_namespace: v2
 output_root: runs
@@ -40,6 +49,11 @@ overrides:
   experiment.gamma: 0.9
   algorithm_config.params.entropy_coef: 0.1
   experiment.on_policy_n_minibatch_iters: 5
+  # Five episodes put the standard error at 1.69 against effects of 1-3 return
+  # points, because 94% of episodes score exactly zero. The evaluation env is
+  # batched, so this widens the batch rather than adding rollouts: measured at
+  # +24% evaluation wall-clock for 25x the samples. See docs/RESULTS_pcp_pilot.md.
+  experiment.evaluation_episodes: 128
   experiment.evaluation_interval: 12000
   experiment.checkpoint_interval: 12000
   experiment.checkpoint_at_end: true

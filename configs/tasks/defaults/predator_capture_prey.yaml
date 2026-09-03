@@ -8,3 +8,15 @@ prey_boundary_margin: 0.3
 prey_wander_force: 0.15
 prey_noise_std: 0.05
 prey_min_flee_frac: 0.3
+
+# Distance past which a predator no longer observes the prey's position or
+# velocity; a visibility flag is appended in their place, making the predator
+# observation 17-dim rather than stock simple_tag's 16. This is what gives the
+# task information asymmetry -- without it every predator always sees the prey
+# and a message can only re-transmit what its receiver already has, which is the
+# condition that produced the Simple Spread null. Calibrated at 1.0 against the
+# random-policy geometry (mean predator-prey distance 1.08): the team is blind
+# 14% of steps, exactly one of three predators sees the prey 41% of the time --
+# the modal case, and the one where routing a message actually matters -- and
+# all three see it only 10% of the time. See docs/RESULTS_pcp_pilot.md Gate A.
+predator_sensing_radius: 1.0

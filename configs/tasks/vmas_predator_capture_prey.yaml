@@ -3,6 +3,10 @@ params:
   num_good_agents: 1
   num_adversaries: 3
   num_landmarks: 2
+  # Hides the prey from a predator past this distance and appends a visibility
+  # flag, taking the predator observation to 17 dims. See the defaults file for
+  # the calibration and docs/RESULTS_pcp_pilot.md for why the task needs it.
+  predator_sensing_radius: 1.0
 
 # Groups whose reward is the study's return. Only the predators are trained for
 # their own sake; `agent` is the scripted prey, and simple_tag's rewards are

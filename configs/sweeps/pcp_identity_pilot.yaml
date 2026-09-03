@@ -21,6 +21,15 @@ overrides:
   # algorithm/task/model/seed/max_n_frames plus this block, so a top-level
   # `critic_model:` would be dropped without a word.
   critic_model: pcp_critic
+  # The same optimizer protocol pcp_comm_main runs, so the only variable this
+  # pilot changes is the training budget. The simple_spread pilot it mirrors
+  # predates the frozen protocol and is deliberately left at its historical
+  # settings; copying those here would have answered the budget question for a
+  # configuration no PCP suite uses -- and gamma in particular is one of the
+  # open questions, not a free choice.
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.1
+  experiment.on_policy_n_minibatch_iters: 5
   experiment.evaluation_interval: 12000
   experiment.checkpoint_at_end: true
   experiment.keep_checkpoints_num: 2

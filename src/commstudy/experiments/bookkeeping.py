@@ -576,6 +576,13 @@ def summarize_metrics_csv(path: Path) -> dict[str, Any]:
             if (
                 row.get("phase") == "evaluation"
                 and row.get("metric") == "return_mean"
+                # The study figure is written without a group; per-group returns
+                # are recorded alongside it and must not be averaged into the
+                # curve. On a single-group task the two agree, so omitting this
+                # is silently harmless; on PCP it divides the predators' return
+                # by three. `_evaluation_curve` in analysis/aggregate.py applies
+                # the same filter and the two must stay in step.
+                and not row.get("group")
                 and not row.get("sample")
             ):
                 points.setdefault(int(row["frames"]), []).append(float(row["value"]))

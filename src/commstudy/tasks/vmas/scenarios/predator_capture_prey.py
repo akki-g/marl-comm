@@ -19,7 +19,14 @@ class PredatorCapturePreyScenario(SimpleTagScenario):
         self.prey_wander_force = kwargs.pop("prey_wander_force", 0.15)
         self.prey_noise_std = kwargs.pop("prey_noise_std", 0.05)
         self.prey_min_flee_frac = kwargs.pop("prey_min_flee_frac", 0.3)
- 
+
+        # Distance beyond which a predator stops observing the prey. `None`
+        # keeps stock simple_tag observations, where every predator always sees
+        # the prey's position and velocity -- fully observable, and therefore
+        # unable to pose the selection problem this study measures. See
+        # `docs/RESULTS_pcp_pilot.md` for why that matters.
+        self.predator_sensing_radius = kwargs.pop("predator_sensing_radius", None)
+
         world = super().make_world(batch_dim, device, **kwargs)
  
         # Cache a persistent per-agent wander direction so idle motion looks
@@ -37,6 +44,51 @@ class PredatorCapturePreyScenario(SimpleTagScenario):
             agent.action.u = self._scripted_prey_action(agent)
         else:
             super().process_action(agent)
+
+
+    def observation(self, agent):
+        """Stock simple_tag observations, with the prey hidden past a radius.
+
+        When `predator_sensing_radius` is set, a predator's view of the prey is
+        zeroed beyond that distance and one visibility flag per prey is appended
+        (1.0 = in range). Predators still see each other and the landmarks, so
+        the only thing a message can carry that its receiver lacks is where the
+        prey is -- which is the point: at any step only some predators can
+        answer that, and which ones changes as the chase moves.
+
+        The masked block is found by layout rather than by a hardcoded index.
+        `SimpleTagScenario.observation` walks `world.agents` in order, and
+        `make_world` adds every adversary before every good agent, so for a
+        predator the tail is always all prey positions followed by all prey
+        velocities. The prey's own observation is untouched -- it is scripted,
+        so its policy never runs.
+        """
+        obs = super().observation(agent)
+        if self.predator_sensing_radius is None or not agent.adversary:
+            return obs
+
+        prey = self.good_agents()
+        visible = torch.cat(
+            [
+                (
+                    (other.state.pos - agent.state.pos).norm(dim=-1, keepdim=True)
+                    <= self.predator_sensing_radius
+                ).to(obs.dtype)
+                for other in prey
+            ],
+            dim=-1,
+        )
+        mask = visible.repeat_interleave(self.world.dim_p, dim=-1)
+        block = len(prey) * self.world.dim_p
+        return torch.cat(
+            [
+                obs[..., : -2 * block],          # self, landmarks, teammates
+                obs[..., -2 * block : -block] * mask,   # prey positions
+                obs[..., -block:] * mask,               # prey velocities
+                visible,
+            ],
+            dim=-1,
+        )
 
 
     def _scripted_prey_action(self, prey):

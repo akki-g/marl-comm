@@ -319,3 +319,139 @@ def test_pcp_sweep_files_cover_every_communication_model(config_root, tmp_path):
     assert {plan.seed for plan in plans} == {0, 1, 2, 3, 4}
     assert {plan.ablation for plan in plans} == {"main"}
     assert {plan.max_n_frames for plan in plans} == {60_000}
+
+
+def test_pilot_shares_the_main_comparisons_optimizer_protocol(config_root, tmp_path):
+    """The pilot decides the main suite's budget, so it must differ only in that.
+
+    The Simple Spread pilot this one mirrors predates the frozen protocol, so
+    copying its settings verbatim would have measured a configuration no PCP
+    suite runs -- gamma above all, which is itself one of the open questions on
+    this task.
+    """
+    pilot = expand_suite_config(
+        _load_yaml(config_root / "sweeps/pcp_identity_pilot.yaml"),
+        repo_root=tmp_path,
+    )
+    main = expand_suite_config(
+        _load_yaml(config_root / "sweeps/pcp_comm_main.yaml"),
+        repo_root=tmp_path,
+    )
+
+    main_spec = load_experiment_spec(config_root, main[0].overrides)
+    for plan in pilot:
+        spec = load_experiment_spec(config_root, plan.overrides)
+        assert spec.experiment["gamma"] == main_spec.experiment["gamma"]
+        assert (
+            spec.algorithm_config["params"]["entropy_coef"]
+            == main_spec.algorithm_config["params"]["entropy_coef"]
+        )
+        assert (
+            spec.experiment["on_policy_n_minibatch_iters"]
+            == main_spec.experiment["on_policy_n_minibatch_iters"]
+        )
+        assert spec.experiment["evaluation_interval"] == 12_000
+
+    # The budget is the variable under test.
+    assert {plan.max_n_frames for plan in pilot} == {60_000, 120_000}
+
+
+def _pcp_env(**kwargs):
+    """A bare VMAS PCP env, bypassing BenchMARL so the scenario is under test."""
+    from vmas import make_env
+
+    from commstudy.tasks.vmas.scenarios.predator_capture_prey import (
+        PredatorCapturePreyScenario,
+    )
+
+    params = {
+        "max_steps": 100,
+        "num_good_agents": 1,
+        "num_adversaries": 3,
+        "num_landmarks": 2,
+    }
+    params.update(kwargs)
+    env = make_env(
+        scenario=PredatorCapturePreyScenario(),
+        num_envs=64,
+        device="cpu",
+        seed=0,
+        **params,
+    )
+    env.reset()
+    return env
+
+
+def test_predator_sensing_radius_defaults_to_stock_full_observability():
+    """Omitting the radius must not silently change the task.
+
+    The 2026-09-03 pilot ran without it, so its numbers describe this
+    observation, and `docs/RESULTS_pcp_pilot.md` compares against it.
+    """
+    env = _pcp_env()
+    adversary = env.scenario.adversaries()[0]
+    assert env.scenario.predator_sensing_radius is None
+    # vel(2) + pos(2) + 2 landmarks(4) + 2 teammates(4) + prey pos(2) + prey vel(2)
+    assert env.scenario.observation(adversary).shape[-1] == 16
+
+
+def test_predator_sensing_radius_hides_only_the_prey_and_flags_it():
+    """The masked block must be the prey's, found by layout not by index.
+
+    This is Gate A of the PCP plan: without it every predator always sees the
+    prey and a message can only re-transmit what its receiver already has.
+    """
+    radius = 1.0
+    env = _pcp_env(predator_sensing_radius=radius)
+    reference = _pcp_env()
+    scenario, stock = env.scenario, reference.scenario
+    adversary = scenario.adversaries()[0]
+    prey = scenario.good_agents()[0]
+
+    observation = scenario.observation(adversary)
+    expected = stock.observation(stock.adversaries()[0])
+    assert observation.shape[-1] == 17
+
+    distance = (prey.state.pos - adversary.state.pos).norm(dim=-1)
+    visible = observation[:, -1].bool()
+    assert torch.equal(visible, distance <= radius)
+    # Both regimes have to occur, or the assertions below prove nothing.
+    assert bool(visible.any()) and bool((~visible).any())
+
+    # Everything that is not the prey is untouched: self, landmarks, teammates.
+    assert torch.equal(observation[:, :12], expected[:, :12])
+    # The prey block is the stock one where visible, exactly zero where not.
+    assert torch.equal(observation[visible][:, 12:16], expected[visible][:, 12:16])
+    assert not observation[~visible][:, 12:16].any()
+
+
+def test_predator_sensing_radius_layout_generalises_beyond_one_prey():
+    """The mask is located by counting prey, not by hardcoding 12:16."""
+    env = _pcp_env(
+        predator_sensing_radius=1.0, num_good_agents=2, num_adversaries=4, num_landmarks=3
+    )
+    scenario = env.scenario
+    adversary = scenario.adversaries()[0]
+    observation = scenario.observation(adversary)
+
+    # vel2 + pos2 + landmarks 3*2 + teammates 3*2 + prey pos 2*2 + prey vel 2*2 + 2 flags
+    assert observation.shape[-1] == 26
+    for index, prey in enumerate(scenario.good_agents()):
+        distance = (prey.state.pos - adversary.state.pos).norm(dim=-1)
+        assert torch.equal(observation[:, -2 + index].bool(), distance <= 1.0)
+
+
+def test_pcp_task_config_ships_the_sensing_radius(config_root):
+    """A radius that is set but never reaches the env is the worst outcome:
+    the suite would look partially observable and run fully observable."""
+    spec = load_experiment_spec(
+        config_root,
+        [f"task={PCP_TASK}", "model=pcp_comm_broadcast", "critic_model=pcp_critic"],
+    )
+    assert spec.task_config["params"]["predator_sensing_radius"] == 1.0
+
+    experiment = build_experiment(spec)
+    observation_dim = experiment.observation_spec[ADVERSARY_GROUP][
+        "observation"
+    ].shape[-1]
+    assert observation_dim == 17

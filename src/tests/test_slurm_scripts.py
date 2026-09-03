@@ -40,12 +40,14 @@ SCRIPTS = (
     "04_analyze.sbatch",
     "pcp_01_setup.sbatch",
     "pcp_02_pilot.sbatch",
+    "pcp_02b_protocol.sbatch",
     "pcp_03_main_comparison.sbatch",
     "pcp_04_ablations.sbatch",
     "pcp_05_analyze.sbatch",
 )
 
 PCP_PILOT_SUITE = "pcp_identity_pilot.yaml"
+PCP_PROTOCOL_SUITE = "pcp_protocol_gate.yaml"
 PCP_MAIN_SUITE = "pcp_comm_main.yaml"
 PCP_ABLATION_SUITES = (
     "pcp_comm_stage2_message_dim.yaml",
@@ -59,6 +61,7 @@ PCP_ABLATION_SUITES = (
 
 PCP_TRAINING_SCRIPTS = (
     "pcp_02_pilot.sbatch",
+    "pcp_02b_protocol.sbatch",
     "pcp_03_main_comparison.sbatch",
     "pcp_04_ablations.sbatch",
 )
@@ -405,3 +408,49 @@ def test_pcp_launch_scripts_state_the_uncalibrated_budget():
     assert "60,000 frames" in main
     assert "PILOT" in main
     assert "gate" in pilot
+
+
+def test_protocol_gate_array_range_covers_every_planned_row(config_root, tmp_path):
+    plans = _plans(PCP_PROTOCOL_SUITE, config_root, tmp_path)
+    script = (SLURM / "pcp_02b_protocol.sbatch").read_text(encoding="utf-8")
+
+    assert len(plans) == 27
+    assert _array_upper_bound(script) == len(plans) - 1
+    assert "runs/pcp_protocol_gate/manifest.csv" in script
+
+
+def test_setup_builds_the_protocol_gate_manifest():
+    """The gate cannot run from a manifest nobody writes."""
+    setup = (SLURM / "pcp_01_setup.sbatch").read_text(encoding="utf-8")
+    assert "configs/sweeps/pcp_protocol_gate.yaml" in setup
+    assert "pcp_02b_protocol.sbatch" in setup
+
+
+def test_pcp_comparison_suites_carry_enough_evaluation_episodes(config_root):
+    """Five episodes put the standard error above the effect being measured.
+
+    Measured over 300 random episodes: mean 0.833, std 3.789, 94% of episodes
+    scoring exactly zero, so SEM at n=5 is 1.69 against effects of 1-3 return
+    points. The evaluation env is batched, so raising this widens the batch
+    instead of adding rollouts. See docs/RESULTS_pcp_pilot.md.
+    """
+    suites = (PCP_MAIN_SUITE, PCP_PROTOCOL_SUITE, *PCP_ABLATION_SUITES)
+    for name in suites:
+        document = OmegaConf.to_container(
+            OmegaConf.load(config_root / "sweeps" / name), resolve=True
+        )
+        episodes = document["overrides"]["experiment.evaluation_episodes"]
+        assert episodes >= 128, f"{name} evaluates on only {episodes} episodes"
+
+
+def test_blocked_pcp_suites_say_so_where_someone_would_look(config_root):
+    """The placeholder budget/gamma/entropy must not read as settled.
+
+    V1 on Simple Spread is preserved in this repo as evidence of what launching
+    a full grid under an unvalidated protocol costs; these files are the last
+    thing between that and 231 PCP rows.
+    """
+    for name in (PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
+        text = (config_root / "sweeps" / name).read_text(encoding="utf-8")
+        assert "BLOCKED" in text, name
+        assert "pcp_protocol_gate.yaml" in text, name
