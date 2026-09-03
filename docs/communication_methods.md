@@ -373,7 +373,12 @@ Learned weights are never modified; only the channel is removed. This makes the
 intervention exact rather than approximate, and identical across modules.
 
 Both arms are rolled out from the same environment seed, so the comparison is
-paired and reflects the intervention rather than episode variance.
+paired and reflects the intervention rather than episode variance. Both returns
+are computed over the groups the task declares as its study return
+(`return_groups`), which is every agent on Simple Spread and the predators alone
+on Predator-Capture-Prey. Averaging over a scripted opponent group instead would
+force both arms to zero on a zero-sum task, and a zero delta is precisely the
+value that marks a non-communicating control.
 
 Reported fields:
 

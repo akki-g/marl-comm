@@ -2,4 +2,11 @@ params:
   max_steps: 100
   num_good_agents: 1
   num_adversaries: 3
-  num_obstacles: 2
+  num_landmarks: 2
+
+# Groups whose reward is the study's return. Only the predators are trained for
+# their own sake; `agent` is the scripted prey, and simple_tag's rewards are
+# exactly zero-sum between the two, so including it would cancel the signal to
+# zero rather than dilute it.
+return_groups:
+  - adversary

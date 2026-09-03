@@ -38,6 +38,29 @@ SCRIPTS = (
     "02_main_comparison.sbatch",
     "03_ablations.sbatch",
     "04_analyze.sbatch",
+    "pcp_01_setup.sbatch",
+    "pcp_02_pilot.sbatch",
+    "pcp_03_main_comparison.sbatch",
+    "pcp_04_ablations.sbatch",
+    "pcp_05_analyze.sbatch",
+)
+
+PCP_PILOT_SUITE = "pcp_identity_pilot.yaml"
+PCP_MAIN_SUITE = "pcp_comm_main.yaml"
+PCP_ABLATION_SUITES = (
+    "pcp_comm_stage2_message_dim.yaml",
+    "pcp_comm_stage2_dropout.yaml",
+    "pcp_comm_stage3_rounds.yaml",
+    "pcp_comm_stage3_heads.yaml",
+    "pcp_comm_stage4_graph_topology.yaml",
+    "pcp_comm_stage4_sender_budget.yaml",
+    "pcp_comm_stage4_self_communication.yaml",
+)
+
+PCP_TRAINING_SCRIPTS = (
+    "pcp_02_pilot.sbatch",
+    "pcp_03_main_comparison.sbatch",
+    "pcp_04_ablations.sbatch",
 )
 
 
@@ -274,3 +297,111 @@ def test_scripts_are_sourced_not_executed():
     for name in ("02_main_comparison.sbatch", "03_ablations.sbatch", "04_analyze.sbatch"):
         script = (SLURM / name).read_text(encoding="utf-8")
         assert "source slurm/newton_env.sh" in script
+
+
+def test_pcp_pilot_array_range_covers_every_planned_row(config_root, tmp_path):
+    plans = _plans(PCP_PILOT_SUITE, config_root, tmp_path)
+    script = (SLURM / "pcp_02_pilot.sbatch").read_text(encoding="utf-8")
+
+    assert _array_upper_bound(script) == len(plans) - 1
+
+
+def test_pcp_main_array_range_covers_every_planned_row(config_root, tmp_path):
+    plans = _plans(PCP_MAIN_SUITE, config_root, tmp_path)
+    script = (SLURM / "pcp_03_main_comparison.sbatch").read_text(encoding="utf-8")
+
+    assert _array_upper_bound(script) == len(plans) - 1
+
+
+def test_pcp_ablation_array_range_covers_every_planned_row(config_root, tmp_path):
+    total = sum(
+        len(_plans(name, config_root, tmp_path)) for name in PCP_ABLATION_SUITES
+    )
+    script = (SLURM / "pcp_04_ablations.sbatch").read_text(encoding="utf-8")
+
+    assert _array_upper_bound(script) == total - 1
+
+
+def test_pcp_setup_builds_exactly_the_suites_the_arrays_consume():
+    setup = (SLURM / "pcp_01_setup.sbatch").read_text(encoding="utf-8")
+
+    for name in (PCP_PILOT_SUITE, PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
+        assert name in setup, f"pcp_01_setup.sbatch never builds a manifest for {name}"
+
+
+def test_pcp_combined_manifest_matches_the_ablation_array(config_root, tmp_path):
+    destination = tmp_path / "pcp_combined.csv"
+
+    _, plans = create_combined_manifest(
+        [config_root / "sweeps" / name for name in PCP_ABLATION_SUITES],
+        destination,
+        repo_root=tmp_path,
+    )
+    script = (SLURM / "pcp_04_ablations.sbatch").read_text(encoding="utf-8")
+
+    assert destination.exists()
+    assert _array_upper_bound(script) == len(plans) - 1
+    assert len({plan.run_id for plan in plans}) == len(plans)
+    assert len({plan.suite_id for plan in plans}) == len(PCP_ABLATION_SUITES)
+
+
+def test_pcp_manifest_paths_agree_and_do_not_collide_with_simple_spread():
+    """A shared combined-manifest path would let one study overwrite the other."""
+
+    setup = (SLURM / "pcp_01_setup.sbatch").read_text(encoding="utf-8")
+    ablations = (SLURM / "pcp_04_ablations.sbatch").read_text(encoding="utf-8")
+    simple_spread = (SLURM / "03_ablations.sbatch").read_text(encoding="utf-8")
+
+    assert "runs/_manifests/pcp_ablations.csv" in setup
+    assert "runs/_manifests/pcp_ablations.csv" in ablations
+    assert "runs/_manifests/pcp_ablations.csv" not in simple_spread
+
+
+@pytest.mark.parametrize("name", PCP_TRAINING_SCRIPTS)
+def test_pcp_training_scripts_reclaim_stale_rows_and_pin_the_device(name):
+    script = (SLURM / name).read_text(encoding="utf-8")
+
+    assert "--reclaim-stale" in script
+    for key in ("sampling_device", "train_device", "buffer_device"):
+        assert f"experiment.{key}=" in script
+
+
+@pytest.mark.parametrize("name", PCP_TRAINING_SCRIPTS)
+def test_pcp_training_scripts_fail_loudly_without_a_manifest(name):
+    script = (SLURM / name).read_text(encoding="utf-8")
+
+    assert "pcp_01_setup.sbatch" in script
+    assert "exit 1" in script
+
+
+def test_pcp_scripts_reuse_the_shared_environment_and_do_not_rebuild_it():
+    """The venv is built in one place. Two copies of that logic would drift."""
+
+    for name in (*PCP_TRAINING_SCRIPTS, "pcp_01_setup.sbatch", "pcp_05_analyze.sbatch"):
+        script = (SLURM / name).read_text(encoding="utf-8")
+        assert "source slurm/newton_env.sh" in script
+        assert "-m venv" not in script
+        assert "pip install" not in script
+
+
+def test_pcp_analysis_covers_every_suite_the_arrays_produce():
+    analyze = (SLURM / "pcp_05_analyze.sbatch").read_text(encoding="utf-8")
+
+    for name in (PCP_PILOT_SUITE, PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
+        assert name.removesuffix(".yaml") in analyze
+
+
+def test_pcp_launch_scripts_state_the_uncalibrated_budget():
+    """The horizon is a first pass, not a gate result. Saying so is the guard.
+
+    Nothing in the tooling stops someone submitting 231 rows at a budget no
+    diagnostic has justified, which is precisely how V1 was lost on Simple
+    Spread, so the scripts have to carry the warning themselves.
+    """
+
+    main = (SLURM / "pcp_03_main_comparison.sbatch").read_text(encoding="utf-8")
+    pilot = (SLURM / "pcp_02_pilot.sbatch").read_text(encoding="utf-8")
+
+    assert "60,000 frames" in main
+    assert "PILOT" in main
+    assert "gate" in pilot

@@ -1,10 +1,23 @@
 # marl-comm
 
 Controlled learned-communication experiments for cooperative multi-agent
-reinforcement learning. The current phase uses stock VMAS Simple Spread,
-BenchMARL MAPPO, one centralized MLP critic, and a swappable actor-side
-`CommModule`. PCP and PP are intentionally out of scope until this benchmark
-layer passes its completion gates.
+reinforcement learning. Every row pairs one VMAS task, BenchMARL MAPPO, one
+centralized MLP critic, and a swappable actor-side `CommModule`; only the
+communication mechanism changes.
+
+Two tasks are available. Stock VMAS Simple Spread is the reference task and
+carries the completed architecture comparison
+([docs/RESULTS_v2_simple_spread.md](docs/RESULTS_v2_simple_spread.md)).
+Predator-Capture-Prey (PCP) is a second task family for the same comparison:
+three trained predators pursuing one scripted prey, described under
+[Predator-Capture-Prey](#predator-capture-prey). Role/class-id conditioning on
+PCP and the PP task both remain out of scope.
+
+The infrastructure underneath is used unmodified: the simulator is VMAS
+([Bettini et al., DARS 2022](https://arxiv.org/abs/2207.03530)), the
+experiment/config layer is BenchMARL (Bettini, Prorok, and Moens, *JMLR*
+25(217), 2024), and every row trains with BenchMARL's MAPPO
+([Yu et al., NeurIPS 2022 Datasets and Benchmarks](https://arxiv.org/abs/2103.01955)).
 
 ## Setup
 
@@ -95,6 +108,85 @@ or training. A completed run is skipped. A failed or otherwise existing run is
 preserved; use `--retry` to create a clearly named `__retryNN` attempt. Native
 BenchMARL restore is not advertised as exact scientific resume because its
 checkpoint does not include Adam state.
+
+## Predator-Capture-Prey
+
+PCP is the project's second task. It subclasses VMAS's port of the MPE
+`simple_tag` predator-prey scenario
+([Lowe et al., NeurIPS 2017](https://arxiv.org/abs/1706.02275)) and replaces the
+prey's learned policy with a hand-written pursuit-evasion rule, so the only
+trained group is the three predators. The scenario itself is unchanged
+otherwise; see `src/commstudy/tasks/vmas/scenarios/predator_capture_prey.py`.
+
+It exists to test whether a communication mechanism's advantage on Simple
+Spread generalizes to a structurally different coordination problem. Simple
+Spread rewards coverage, so messages mostly help agents avoid claiming the same
+landmark. PCP rewards interception of an actively fleeing target, so the
+plausible value of a message is pursuit coordination — one predator's view of
+the prey is useful to a predator that currently has none. That is much closer
+to what TarMAC, ATOC, and DGN were evaluated on. A mechanism that helps on both
+is evidence about information sharing under coordination pressure rather than
+about one task's geometry; a result that reverses on PCP is itself a finding,
+not a bug.
+
+Select the task and its grouped models:
+
+```bash
+uv run python scripts/train.py --suite-id pcp_smoke \
+  task=vmas_predator_capture_prey \
+  model=pcp_comm_attention critic_model=pcp_critic \
+  seed=0 experiment.max_n_frames=6000
+```
+
+PCP runs two BenchMARL groups — `adversary` (predators) and `agent` (prey) — so
+its actor and critic configs are group ensembles rather than flat ones:
+
+| Config | Role |
+|---|---|
+| `pcp_actor` | framework reference MLP, the PCP equivalent of `benchmarl_mlp` |
+| `pcp_comm_identity` … `pcp_comm_graph` | one per `comm_*` model, communication on the `adversary` group only |
+| `pcp_critic` | centralized MLP critic for both groups; the critic never carries communication |
+
+Two consequences worth knowing before launching anything:
+
+- **Overrides are group-scoped.** What is `model_config.params.comm_kwargs.X`
+  on Simple Spread is `model_config.groups.adversary.params.comm_kwargs.X` on
+  PCP. The flat path does not fail — OmegaConf merges it in as a stray key that
+  nothing reads — so an ablation written that way runs silently at its default.
+- **The prey group trains a policy that is thrown away.** BenchMARL builds and
+  optimizes an actor and critic for the `agent` group like any other, but
+  `PredatorCapturePreyScenario.process_action` overwrites its action with the
+  scripted force on every step. The `agent` blocks are kept deliberately tiny
+  for that reason. Its loss and gradient rows in `metrics.csv` are expected
+  waste, not a symptom.
+
+**What counts as the return.** A task declares the groups whose reward is the
+study's outcome, as `return_groups` beside `params` in
+`configs/tasks/<task>.yaml`: `[agents]` for Simple Spread, `[adversary]` for
+PCP. This matters because `simple_tag`'s two groups are exactly zero-sum — each
+predator scores `+10` per capture and the prey `−10` — so averaging over both,
+which is what the metrics and saliency code did before 2026-09-03, reported
+`0.0` no matter how the predators performed. `metrics.csv` also records each
+group's own return as a separate row; the analysis reads the ungrouped study
+row. Omitting the key measures every group, which is what a single-group task
+resolved to anyway, so Simple Spread's numbers are unchanged.
+
+Role/class-id conditioning is deferred on this task. `use_role_embedding` stays
+`false` in every PCP model config: the three predators are homogeneous, and the
+scenario inherits stock `simple_tag` observations, which expose no role signal
+to condition on. Giving them one is a modeling decision (asymmetric speed or
+sensing radius), not a wiring change, and it is not part of this integration.
+
+The PCP suites live in `configs/sweeps/pcp_*.yaml` and mirror the V2 Simple
+Spread suites row for row, with one deliberate difference: `max_n_frames` is
+60,000 rather than 600,000. PCP has no stability gate of its own yet, so that
+is a cheap first pass rather than a calibrated horizon, and every file carries
+a `TODO` saying so. Review them the usual way:
+
+```bash
+uv run python scripts/sweep.py configs/sweeps/pcp_identity_pilot.yaml --dry-run
+uv run python scripts/sweep.py configs/sweeps/pcp_comm_main.yaml --dry-run
+```
 
 ## Baseline calibration and sweep workflow
 
@@ -294,6 +386,14 @@ script is the recovery path after preemption: completed rows are skipped and
 abandoned rows are retried. See [slurm/README.md](slurm/README.md) for module
 overrides, monitoring, preemption, cost, and storage.
 
+PCP has its own parallel family — `slurm/pcp_01_setup.sbatch` through
+`slurm/pcp_05_analyze.sbatch`, reusing the same virtualenv. Run the pilot and
+read it before the main comparison: PCP's training budget has never been
+calibrated, and at the budget measured so far a deterministic policy never
+catches the prey, which leaves the evaluation return a five-sample rare-event
+count. The evidence is in
+[slurm/README.md](slurm/README.md#predator-capture-prey).
+
 Two things to be deliberate about:
 
 - **A GPU does not make a single row faster.** These actors are 19k--35k
@@ -467,5 +567,7 @@ is rejected because a sender mask cannot replay payload noise; use its explicit
 evaluation mode instead. Static ring/random graphs on Simple Spread are
 topology diagnostics, not models of physical radio links.
 
-Do not add PCP/PP, fork MAPPO, or place communication logic in the algorithm,
-runner, task, or VMAS environment during this phase.
+PCP now runs the same comparison on a second task; its protocol is not yet
+calibrated (see [Predator-Capture-Prey](#predator-capture-prey)). PP, forking
+MAPPO, and placing communication logic in the algorithm, runner, task, or VMAS
+environment all remain out of scope.

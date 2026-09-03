@@ -1,0 +1,41 @@
+# First managed PCP suite: the no-communication control on its own, to
+# establish that the predators learn anything at all on this task before any
+# compute is spent comparing communication mechanisms. Mirrors
+# simple_spread_identity_pilot.yaml with PCP's grouped actor/critic and a
+# scaled-down budget (see the note above `runs`).
+suite_id: pcp_identity_pilot
+run_namespace: v2
+output_root: runs
+
+algorithm: mappo
+task: vmas_predator_capture_prey
+models:
+  - pcp_comm_identity
+seeds:
+  - 0
+
+overrides:
+  # PCP trains two BenchMARL groups, so its actor and critic are grouped
+  # ensembles and the grouped critic must be selected explicitly. It belongs
+  # here rather than in a top-level key: expand_suite_config emits only
+  # algorithm/task/model/seed/max_n_frames plus this block, so a top-level
+  # `critic_model:` would be dropped without a word.
+  critic_model: pcp_critic
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
+
+# First-pass budgets, an order of magnitude below the frozen simple_spread
+# horizon. PCP has no stability gate of its own yet, so these are deliberately
+# cheap rows rather than calibrated ones, and at 60,000 frames the
+# 12,000-frame evaluation interval leaves five evaluation points, which
+# collapses the final-10% statistic to a single point.
+# TODO: recalibrate once a stability gate exists for PCP.
+runs:
+  - ablation: training_budget
+    ablation_value: 60000
+    max_n_frames: 60000
+
+  - ablation: training_budget
+    ablation_value: 120000
+    max_n_frames: 120000

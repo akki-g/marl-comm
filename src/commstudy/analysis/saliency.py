@@ -52,6 +52,11 @@ from torchrl.envs.utils import ExplorationType, set_exploration_type
 
 from commstudy.communication.base import CommModule
 from commstudy.communication.channel import build_channel
+from commstudy.experiments.returns import (
+    group_rollout_returns,
+    mean_over_groups,
+    resolve_return_groups,
+)
 
 
 @dataclass(frozen=True)
@@ -146,20 +151,25 @@ def _rollout(experiment: Any, *, steps: int, episodes: int, seed: int | None) ->
     ]
 
 
-def _episode_returns(experiment: Any, rollouts: Sequence[Any]) -> list[float]:
-    """Summed per-episode reward, averaged over agent groups."""
+def _episode_returns(
+    experiment: Any,
+    rollouts: Sequence[Any],
+    groups: Sequence[str],
+) -> list[float]:
+    """Summed per-episode reward, averaged over the measured agent groups.
 
+    Saliency is a difference of returns, so it has to measure the same thing the
+    study reports. Averaging over every group instead would make the delta
+    identically zero on a task whose groups are zero-sum, which is exactly the
+    value that marks a non-communicating control.
+    """
+
+    del experiment
     returns: list[float] = []
     for rollout in rollouts:
-        group_returns = []
-        for group in experiment.group_map:
-            reward = rollout.get(("next", group, "reward"), None)
-            if reward is None:
-                reward = rollout.get(("next", "reward"), None)
-            if reward is not None:
-                group_returns.append(float(reward.sum(0).mean().detach().cpu()))
-        if group_returns:
-            returns.append(sum(group_returns) / len(group_returns))
+        episode_return = mean_over_groups(group_rollout_returns(rollout, groups))
+        if episode_return is not None:
+            returns.append(episode_return)
     return returns
 
 
@@ -254,6 +264,7 @@ def communication_saliency(
     steps: int | None = None,
     exploration: str = "DETERMINISTIC",
     seed: int = 0,
+    return_groups: Sequence[str] | None = None,
 ) -> SaliencyResult:
     """Measure the task benefit and behavioural influence of the channel.
 
@@ -266,6 +277,7 @@ def communication_saliency(
     modules = communication_modules(experiment)
     max_steps = int(steps if steps is not None else experiment.max_steps)
     mode = ExplorationType[exploration.upper()]
+    groups = resolve_return_groups(experiment.group_map, return_groups)
 
     with torch.no_grad(), set_exploration_type(mode):
         with_rollouts = _rollout(experiment, steps=max_steps, episodes=episodes, seed=seed)
@@ -274,8 +286,8 @@ def communication_saliency(
                 experiment, steps=max_steps, episodes=episodes, seed=seed
             )
 
-    returns_with = _episode_returns(experiment, with_rollouts)
-    returns_without = _episode_returns(experiment, without_rollouts)
+    returns_with = _episode_returns(experiment, with_rollouts, groups)
+    returns_without = _episode_returns(experiment, without_rollouts, groups)
     mean_with = float(sum(returns_with) / len(returns_with)) if returns_with else math.nan
     mean_without = (
         float(sum(returns_without) / len(returns_without)) if returns_without else math.nan

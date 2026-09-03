@@ -6,9 +6,10 @@ import json
 import tempfile
 from pathlib import Path
 
-from commstudy.analysis.diagnostics import load_frozen_experiment
+from commstudy.analysis.diagnostics import load_frozen_experiment, rebuild_spec
 from commstudy.analysis.saliency import communication_saliency
 from commstudy.experiments.bookkeeping import atomic_write_json, utc_now
+from commstudy.experiments.returns import RETURN_GROUPS_KEY
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -58,11 +59,15 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="commstudy-saliency-") as scratch:
         for run_dir in run_dirs:
             metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+            config_root = repo_root / "configs"
             experiment = load_frozen_experiment(
                 run_dir,
-                config_root=repo_root / "configs",
+                config_root=config_root,
                 scratch_root=Path(scratch) / run_dir.name,
             )
+            # Saliency is a difference of returns, so it has to measure exactly
+            # the groups the run's task declares as the study's return.
+            spec = rebuild_spec(run_dir, config_root)
             try:
                 result = communication_saliency(
                     experiment,
@@ -70,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
                     steps=args.steps,
                     exploration=args.exploration,
                     seed=args.seed,
+                    return_groups=spec.task_config.get(RETURN_GROUPS_KEY),
                 )
             finally:
                 close = getattr(experiment.test_env, "close", None)

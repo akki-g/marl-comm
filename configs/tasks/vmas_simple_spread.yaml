@@ -2,3 +2,8 @@ params:
   max_steps: 100
   n_agents: 3
   obs_agents: true
+
+# Groups whose reward is the study's return. Simple Spread has a single trained
+# group, so this is every agent and matches the previous all-groups default.
+return_groups:
+  - agents

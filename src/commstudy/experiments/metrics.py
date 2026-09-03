@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import math
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,12 @@ from tensordict import TensorDict
 
 from commstudy.communication.base import CommModule
 from commstudy.experiments.bookkeeping import parameter_counts
+from commstudy.experiments.returns import (
+    group_collection_returns,
+    group_rollout_returns,
+    mean_over_groups,
+    resolve_return_groups,
+)
 
 
 METRIC_COLUMNS = (
@@ -97,11 +103,18 @@ class ExperimentMetricsCallback(Callback):
         self,
         run_dir: str | Path,
         heartbeat: Callable[[], None] | None = None,
+        return_groups: Sequence[str] | None = None,
     ) -> None:
         super().__init__()
         self.writer = TidyMetricsWriter(run_dir)
         self._heartbeat = heartbeat
         self._wall_start: float | None = None
+        # Which groups' reward is the study's return. None means every group,
+        # which is what a single-group task resolves to anyway.
+        self._configured_return_groups = (
+            None if return_groups is None else tuple(str(g) for g in return_groups)
+        )
+        self._return_groups: tuple[str, ...] = ()
 
     def _elapsed(self) -> float:
         if self._wall_start is None:
@@ -148,6 +161,12 @@ class ExperimentMetricsCallback(Callback):
 
     def on_setup(self) -> None:
         self._wall_start = time.perf_counter()
+        # Resolved here so a mistyped group name fails at run start rather than
+        # producing a study whose headline metric is quietly absent.
+        self._return_groups = resolve_return_groups(
+            self.experiment.group_map,
+            self._configured_return_groups,
+        )
         counts = parameter_counts(self.experiment)
         metrics = {f"parameters_{key}": value for key, value in counts.items()}
         self.writer.write(
@@ -161,13 +180,18 @@ class ExperimentMetricsCallback(Callback):
         self._drain_comm_stats()
 
     def on_batch_collected(self, batch) -> None:
-        del batch
         if self._heartbeat is not None:
             self._heartbeat()
-        metrics = {
-            "return_mean": self.experiment.mean_return,
-            "wall_time_seconds": self._elapsed(),
-        }
+        # Not experiment.mean_return: BenchMARL averages over every group, which
+        # on a two-group zero-sum task such as PCP is identically zero. This is
+        # the same per-group figure BenchMARL logs, restricted to the groups the
+        # study measures, so a single-group task is unchanged.
+        per_group = group_collection_returns(batch, tuple(self.experiment.group_map))
+        study_return = mean_over_groups(self._measured(per_group))
+
+        metrics: dict[str, Any] = {"wall_time_seconds": self._elapsed()}
+        if study_return is not None:
+            metrics["return_mean"] = study_return
         comm_stats = self._drain_comm_stats()
         metrics.update(comm_stats)
         self.writer.write(
@@ -176,6 +200,7 @@ class ExperimentMetricsCallback(Callback):
             phase="collection",
             metrics=metrics,
         )
+        self._write_group_returns("collection", per_group)
         self._forward_to_benchmarl(comm_stats, "collection/communication")
 
     def on_train_step(self, batch, group: str) -> TensorDict | None:
@@ -206,18 +231,47 @@ class ExperimentMetricsCallback(Callback):
             metrics=metrics,
         )
 
+    def _measured(self, per_group: Mapping[str, float]) -> dict[str, float]:
+        """Keep only the groups whose reward the study reports."""
+
+        return {
+            group: value
+            for group, value in per_group.items()
+            if group in self._return_groups
+        }
+
+    def _write_group_returns(self, phase: str, per_group: Mapping[str, float]) -> None:
+        """Record each measured group's own return beside the study figure.
+
+        The aggregate at group "" is what the analysis reads. These rows exist
+        so a mis-declared ``return_groups`` is visible in the data rather than
+        only in the config, and so a scripted or otherwise excluded group can
+        still be inspected.
+        """
+
+        for group, value in per_group.items():
+            self.writer.write(
+                frames=self.experiment.total_frames,
+                iteration=self.experiment.n_iters_performed,
+                phase=phase,
+                group=group,
+                metrics={"return_mean": value},
+            )
+
     def on_evaluation_end(self, rollouts) -> None:
         episode_returns: list[float] = []
+        per_group_totals: dict[str, list[float]] = {}
         for rollout in rollouts:
-            group_returns = []
-            for group in self.experiment.group_map:
-                reward = rollout.get(("next", group, "reward"), None)
-                if reward is None:
-                    reward = rollout.get(("next", "reward"), None)
-                if reward is not None:
-                    group_returns.append(float(reward.sum(0).mean().detach().cpu()))
-            if group_returns:
-                episode_returns.append(sum(group_returns) / len(group_returns))
+            # Restricted to the measured groups: averaging PCP's predators with
+            # its scripted prey cancels to exactly zero.
+            group_returns = group_rollout_returns(
+                rollout, tuple(self.experiment.group_map)
+            )
+            for group, value in group_returns.items():
+                per_group_totals.setdefault(group, []).append(value)
+            episode_return = mean_over_groups(self._measured(group_returns))
+            if episode_return is not None:
+                episode_returns.append(episode_return)
 
         metrics: dict[str, float] = {}
         if episode_returns:
@@ -240,6 +294,14 @@ class ExperimentMetricsCallback(Callback):
             iteration=self.experiment.n_iters_performed,
             phase="evaluation",
             metrics=metrics,
+        )
+        self._write_group_returns(
+            "evaluation",
+            {
+                group: sum(values) / len(values)
+                for group, values in per_group_totals.items()
+                if values
+            },
         )
         for index, value in enumerate(episode_returns):
             self.writer.write(

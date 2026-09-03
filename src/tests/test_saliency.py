@@ -231,3 +231,47 @@ def test_real_frozen_learned_policy_saliency_is_measurable(tmp_path, config_root
     # An untrained actor initializes its output projection near zero, so the
     # magnitude is not asserted -- only that the comparison actually ran.
     assert result.action_shift_mean >= 0.0
+
+
+def test_saliency_returns_measure_only_the_declared_groups():
+    """Saliency is a difference of returns, so it must measure what the study does.
+
+    On a zero-sum two-group task an all-groups average makes both arms exactly
+    zero, and the delta becomes 0.0 -- indistinguishable from the value that
+    marks a genuinely non-communicating control.
+    """
+
+    from tensordict import TensorDict
+
+    from commstudy.analysis.saliency import _episode_returns
+
+    steps = 4
+    rollout = TensorDict(
+        {
+            "next": TensorDict(
+                {
+                    "adversary": TensorDict(
+                        {"reward": torch.full((steps, 3, 1), 0.5)},
+                        batch_size=[steps, 3],
+                    ),
+                    "agent": TensorDict(
+                        {"reward": torch.full((steps, 1, 1), -0.5)},
+                        batch_size=[steps, 1],
+                    ),
+                },
+                batch_size=[steps],
+            )
+        },
+        batch_size=[steps],
+    )
+
+    class FakeExperiment:
+        group_map = {"adversary": ["a0", "a1", "a2"], "agent": ["p0"]}
+
+    experiment = FakeExperiment()
+
+    assert _episode_returns(experiment, [rollout], ("adversary",)) == [pytest.approx(2.0)]
+    # The previous all-groups behaviour, kept here as the thing being prevented.
+    assert _episode_returns(experiment, [rollout], ("adversary", "agent")) == [
+        pytest.approx(0.0)
+    ]

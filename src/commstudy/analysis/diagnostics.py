@@ -104,13 +104,27 @@ def _value(row: Mapping[str, str]) -> float | None:
         return None
 
 
-def metric_trace(run_dir: Path, phase: str, metric: str) -> MetricTrace | None:
-    """Summarize one ``(phase, metric)`` series, ignoring per-episode samples."""
+def metric_trace(
+    run_dir: Path,
+    phase: str,
+    metric: str,
+    group: str | None = None,
+) -> MetricTrace | None:
+    """Summarize one ``(phase, metric)`` series, ignoring per-episode samples.
+
+    ``group`` selects one group's rows; the default keeps every group, which is
+    what training metrics need since they are always written per group. Pass
+    ``""`` for a metric that also has a per-group breakdown, such as the
+    evaluation return, to read the study figure rather than a mixture of it and
+    its own components.
+    """
 
     points: list[tuple[int, float]] = []
     nonfinite = 0
     for row in _metric_rows(run_dir):
         if row.get("phase") != phase or row.get("metric") != metric or row.get("sample"):
+            continue
+        if group is not None and (row.get("group") or "") != group:
             continue
         value = _value(row)
         if value is None:
@@ -349,7 +363,7 @@ def audit_run(
         else None
     )
 
-    evaluation = metric_trace(run_dir, "evaluation", "return_mean")
+    evaluation = metric_trace(run_dir, "evaluation", "return_mean", group="")
     report["evaluation_points"] = evaluation.count if evaluation else 0
     report["final_evaluation_return"] = evaluation.last if evaluation else None
 

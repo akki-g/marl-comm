@@ -24,6 +24,19 @@ sbatch --dependency=afterany:<main_jobid>:<ablation_jobid> slurm/04_analyze.sbat
 `slurm/newton_env.sh` is *sourced* by the job scripts, never executed, so it
 needs no execute permission.
 
+For Predator-Capture-Prey there is a second, parallel family of scripts. Read
+[Predator-Capture-Prey](#predator-capture-prey) before submitting any of them:
+the outcome metric is fixed as of 2026-09-03, but the budget and the evaluation
+signal are still open questions.
+
+```bash
+sbatch slurm/pcp_01_setup.sbatch             # manifests only; venv comes from 01
+sbatch slurm/pcp_02_pilot.sbatch             # 2 rows   — read before step 3
+sbatch slurm/pcp_03_main_comparison.sbatch   # 30 rows  — 6 models x 5 seeds
+sbatch slurm/pcp_04_ablations.sbatch         # 201 rows — seven ablations
+sbatch slurm/pcp_05_analyze.sbatch           # CSVs, plots, REPORT.md
+```
+
 ## What each experiment is
 
 **`02_main_comparison.sbatch` — 30 rows, the headline result.** Six models x
@@ -59,6 +72,97 @@ Every ablation re-runs its own default point (`message_dim=32`, `rounds=1`,
 `topology=full`, `heads=4`, `exclude_self=true`). Those are matched in-suite
 controls that should reproduce the main-suite rows on seeds 0-2 — a free
 reproducibility check.
+
+## Predator-Capture-Prey
+
+The PCP scripts are complete and tested, and the integration runs end to end.
+**The study is still not ready to launch.** Three problems were measured rather
+than suspected on 2026-09-02; the first is fixed, and the two that remain are
+design decisions rather than defects.
+
+**1. The PCP outcome metric was identically zero — FIXED 2026-09-03.**
+`metrics.py` and `saliency.py` built an episode return by averaging the summed
+reward across *every* agent group. On Simple Spread there is one group, so that
+was that group's return. On PCP there are two, and `simple_tag`'s rewards are
+exactly zero-sum between them: each predator scores `+10` per capture and the
+prey `−10`, so the average was `0.0` by construction, whatever the predators
+did. Measured on two real 60,000-frame rows, every logged return was exactly
+`0.0`.
+
+The measured groups are now declared per task, as `return_groups` beside
+`params` in `configs/tasks/<task>.yaml` — `[agents]` for Simple Spread,
+`[adversary]` for PCP. Omitting the key keeps the old all-groups behaviour.
+`metrics.csv` additionally carries a per-group `return_mean` row, so an excluded
+group stays inspectable and a mis-declaration shows up in the data rather than
+only in the config; the analysis reads the ungrouped study row.
+
+Verified on both tasks, against BenchMARL's own per-group scalars:
+
+| | commstudy study return | BenchMARL per-group | BenchMARL all-group (old behaviour) |
+|---|---|---|---|
+| PCP, `adversary` | `1.333, 0.667, 1.167, 1.5, 0.833` | identical | `0.0, 0.0, 0.0, 0.0, 0.0` |
+| Simple Spread, `agents` | `−552.313, −610.148` | identical | identical |
+
+Simple Spread is therefore bit-identical to before, and PCP now reports the
+predators' return. `test_returns.py` pins both, including the equality with
+BenchMARL's own aggregate on the single-group task.
+
+**2. Deterministic evaluation never catches the prey at this budget (open).**
+In the same rows, the adversary return under *stochastic collection* sits at
+1.0–1.7 — indistinguishable from the 1.5 a uniformly random policy scores — and
+under deterministic evaluation it is 0.0 at every point. Saliency inherits this:
+on a 12,000-frame `pcp_comm_broadcast` run both arms return 0.0, so the delta is
+0.0 even though the channel demonstrably changes behaviour (`action_shift 2.03`,
+`policy_kl 0.0118`). Note the lever is `experiment.evaluation_episodes`, not
+`scripts/saliency.py --episodes`: the evaluation environment is batched, so the
+episode count comes from the environment's batch size. `simple_tag`'s
+adversary reward is sparse by default (`shape_adversary_rew: false`, so reward
+arrives only on contact), and the protocol evaluates 5 episodes per point. The
+headline number is therefore a rare-event count measured with five samples,
+which the metric fix does not change. Levers, all study-design choices: enable
+`shape_adversary_rew`, raise `evaluation_episodes`, lengthen the budget, or
+report capture rate instead of return.
+
+**3. The training budget was never calibrated.** 60,000 frames is ten PPO
+update rounds and five evaluation points. It was chosen as a cheap first pass,
+and cost is not the constraint it was assumed to be: a 60,000-frame PCP row is
+about 70 seconds on one core and a 600,000-frame row about 12 minutes, so the
+entire 231-row study is roughly 4.5 core-hours at the current budget or 45 at
+Simple Spread's. Neither is a meaningful fraction of an 80,000 DPH allocation.
+
+`gamma=0.9` also carries over from Simple Spread untested. It gives an
+effective horizon of about ten steps, which is a different proposition against
+a sparse capture reward than against a dense coverage cost.
+
+None of what remains is a reason to change the code blind. It is a reason to
+decide the reward and evaluation design, and run the pilot before committing
+231 rows — which is what V1 on Simple Spread did not do, and why it
+is preserved in this repo as failure evidence rather than as results.
+
+### What each PCP script is
+
+**`pcp_01_setup.sbatch`** writes the three PCP manifests. It deliberately does
+*not* build the virtualenv; `01_setup.sbatch` owns that, and a second copy of
+that logic would drift. Run `01_setup.sbatch` first.
+
+**`pcp_02_pilot.sbatch` — 2 rows.** The no-communication control at 60,000 and
+120,000 frames, seed 0. `results/pcp_identity_pilot/REPORT.md` now reports the
+predators' return; compare it against the ~1.5 a random policy scores.
+
+**`pcp_03_main_comparison.sbatch` — 30 rows.** `pcp_actor` plus the five
+`pcp_comm_*` models, seeds 0-4. Communication is on the `adversary` group only.
+
+**`pcp_04_ablations.sbatch` — 201 rows, seeds 0-2.** The same seven ablations as
+Simple Spread, in one combined manifest at `runs/_manifests/pcp_ablations.csv`
+(distinct from the Simple Spread combined manifest, so the two studies cannot
+overwrite each other).
+
+**`pcp_05_analyze.sbatch`** covers all nine PCP suites and is safe to re-run
+mid-study.
+
+The prey group trains a policy that is discarded every step by
+`PredatorCapturePreyScenario.process_action`. Its loss and gradient rows in
+`metrics.csv` are expected waste, not a symptom.
 
 ## Read this before you submit
 

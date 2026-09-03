@@ -18,6 +18,7 @@ from commstudy.algorithms import resolve_algorithm
 from commstudy.experiments.bookkeeping import RunContext, RunRecorder
 from commstudy.experiments.config import ExperimentSpec
 from commstudy.experiments.metrics import ExperimentMetricsCallback
+from commstudy.experiments.returns import RETURN_GROUPS_KEY
 from commstudy.models import CommPolicyConfig
 from commstudy.tasks import resolve_task
 from commstudy.utils.imports import import_from_path
@@ -297,7 +298,11 @@ def run_managed_experiment(
         experiment = build_experiment(
             managed_spec,
             callbacks=[
-                ExperimentMetricsCallback(context.run_dir, heartbeat=recorder.heartbeat),
+                ExperimentMetricsCallback(
+                    context.run_dir,
+                    heartbeat=recorder.heartbeat,
+                    return_groups=managed_spec.task_config.get(RETURN_GROUPS_KEY),
+                ),
                 *callbacks,
             ],
         )

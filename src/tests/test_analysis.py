@@ -253,3 +253,52 @@ def test_auc_comm_efficiency_and_ablation_plots_use_aggregate_ci_fields(tmp_path
         assert row["normalized_auc_ci95_high"]
         assert row["comm_message_bits_ci95_low"]
         assert row["comm_message_bits_ci95_high"]
+
+
+def test_per_group_returns_do_not_contaminate_the_evaluation_curve(tmp_path):
+    """The study figure is the ungrouped row; group rows sit beside it.
+
+    A two-group task also records each group's own return. Averaging those into
+    the curve would silently blend the study's metric with its own components --
+    on a zero-sum task such as PCP that pulls the curve toward zero.
+    """
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run",
+                "suite_id": "suite",
+                "status": "completed",
+                "task": "vmas_predator_capture_prey",
+                "algorithm": "mappo",
+                "model": "pcp_actor",
+                "seed": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    writer = TidyMetricsWriter(run_dir)
+    for index, predator_return in enumerate((2.0, 4.0)):
+        writer.write(
+            frames=(index + 1) * 6_000,
+            iteration=index,
+            phase="evaluation",
+            metrics={"return_mean": predator_return},
+        )
+        for group, value in (("adversary", predator_return), ("agent", -predator_return)):
+            writer.write(
+                frames=(index + 1) * 6_000,
+                iteration=index,
+                phase="evaluation",
+                group=group,
+                metrics={"return_mean": value},
+            )
+
+    result = compute_run_result(run_dir)
+
+    # Without the group filter each frame would average 2, 2 and -2 (or 4, 4
+    # and -4), dragging the curve toward zero.
+    assert result["mean_final_return"] == pytest.approx(4.0)
+    assert result["normalized_return_auc"] == pytest.approx(3.0)

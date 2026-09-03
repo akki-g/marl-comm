@@ -1,6 +1,6 @@
 # Agent Handoff: VMAS Simple Spread Communication Study
 
-Last updated: 2026-08-30 23:42 America/New_York
+Last updated: 2026-09-02 America/New_York
 
 ## Objective and stopping point
 
@@ -10,6 +10,12 @@ modules, validation, matched-seed experiments, focused ablations, and
 analysis-ready outputs. Preserve the validated execution path and do **not**
 implement PCP, PP, custom VMAS environments, a forked MAPPO, or
 communication-specific PPO losses.
+
+**Superseded for PCP on 2026-09-02.** That stopping point held until the Simple
+Spread study completed. PCP is now integrated as a second task on the same
+execution path; see "PCP integration landed" at the end of this file. PP, the
+forked MAPPO, and communication-specific PPO losses remain excluded, and so
+does role/class-id conditioning on PCP.
 
 The intended actor path remains:
 
@@ -40,7 +46,8 @@ MLP. `IdentityComm` must remain parameterless and numerically unchanged.
 - Keep this `agents.md` file current with everything researched,
   implemented, learned, tested, failed, and still pending so another agent can
   continue without reconstructing context.
-- Stop before PCP/PP.
+- Stop before PCP/PP. (Lifted for PCP on 2026-09-02, once the Simple Spread
+  study was complete; PP still stands.)
 
 ## Active work plan and status
 
@@ -186,7 +193,11 @@ Behavior intentionally not ported:
 - Old Graph always inserts self-loops and defaults to two layers; the new
   default is one round, full graph minus self, with explicit self behavior.
 - PCP class embeddings, PCP zero-message switches, custom MAPPO/QMIX loops,
-  and environment-specific types are excluded.
+  and environment-specific types are excluded. (Still true after the
+  2026-09-02 PCP integration: the task landed with `use_role_embedding: false`
+  everywhere and no `agent_type` observation key. Its predators are
+  homogeneous and it inherits stock `simple_tag` observations, so there is no
+  data source for a class embedding until a predator role split is designed.)
 - Legacy attention-coefficient dropout is not a communication-failure model.
 - Existing plots use standard deviation/min-max, infer seeds from paths, can
   mispair missing seeds, and do not compute final-10% return or AUC; the new
@@ -1206,3 +1217,151 @@ much cheaper to learn from two modules than from five plus a full ablation grid.
 8. Save aggregate/raw/failed tables and all requested plots under `results/`,
    append individual and aggregate findings here, and give the required exact
    readiness verdict. PCP/PP remain untouched until then.
+
+## PCP integration landed (2026-09-02)
+
+Predator-Capture-Prey now runs end to end on the unchanged execution path, so
+the "stop before PCP" instruction above is historical for this task only.
+
+What landed:
+
+- `configs/tasks/vmas_predator_capture_prey.yaml` and
+  `configs/tasks/defaults/predator_capture_prey.yaml` now say `num_landmarks`
+  instead of `num_obstacles`. VMAS's `simple_tag.make_world` only reads
+  `num_landmarks`, and `ScenarioUtils.check_kwargs_consumed` merely warns about
+  an unknown kwarg, so the old key had no effect; the default happened to match
+  the intended value, which is why nothing looked wrong.
+- Five grouped actor configs `configs/models/pcp_comm_{identity,broadcast,
+  gated,attention,graph}.yaml`, each carrying the corresponding `comm_*.yaml`
+  `params` block verbatim on the `adversary` group and the tiny prey MLP on the
+  `agent` group. `pcp_actor.yaml` (MLP reference) and `pcp_critic.yaml` were
+  already present and are unchanged.
+- Nine sweeps `configs/sweeps/pcp_*.yaml` mirroring the V2 Simple Spread family
+  (pilot, main, and the seven staged ablations). The calibration-only V2 files
+  were deliberately not mirrored.
+- `src/tests/test_pcp_integration.py` plus PCP cases in
+  `test_task_registry.py`. The grouped branch of `build_model_config` had no
+  coverage at all before this, for any task.
+
+Three things a later agent should not rediscover the hard way:
+
+- **Communication overrides on PCP must be group-scoped**:
+  `model_config.groups.adversary.params.comm_kwargs.X`. The flat Simple Spread
+  path merges in as a stray key instead of raising, so the ablation silently
+  runs at its default. `test_heads_ablation_overrides_the_adversary_group_not_a_stray_key`
+  guards this.
+- **`critic_model` must be selected inside a sweep's `overrides` block**, not as
+  a top-level suite key. `expand_suite_config` only emits
+  algorithm/task/model/seed/max_n_frames plus `overrides`, so a top-level
+  `critic_model:` is dropped without a word. The flat `benchmarl_mlp` critic
+  does *not* fail on PCP if it slips through — BenchMARL builds one critic per
+  group and sizes each correctly (22,913 / 18,561 parameters) — so the failure
+  mode is an unpinned critic architecture, not a crash.
+- **The budget is not calibrated.** Every PCP sweep runs at 60,000 frames with
+  a `TODO` saying so. PCP has no stability gate equivalent to the five-seed MLP
+  gate that froze the Simple Spread protocol, and at that budget the
+  12,000-frame evaluation interval leaves five evaluation points, so the
+  final-10% statistic is a single point. Do not report PCP numbers as
+  protocol-grade until a gate exists.
+
+Still deferred, deliberately: role/class-id conditioning on PCP. The predators
+are homogeneous and the scenario inherits stock `simple_tag` observations, so
+`use_role_embedding`, `num_roles`, and the `class_bias` paths in
+`communication/` have no data source on this task. Wiring them up requires
+first designing what a predator role split means here (asymmetric speed?
+asymmetric sensing radius?), which is a modeling decision, not a fix.
+
+## BLOCKER found on first real PCP rows (2026-09-02)
+
+PCP integration is complete and the cluster scripts exist
+(`slurm/pcp_01_setup` .. `pcp_05_analyze`), but **the PCP study must not be
+launched yet**. Two real 60,000-frame rows (`pcp_actor`, `pcp_comm_broadcast`,
+seed 0, frozen V2 optimizer protocol) exposed three problems, in severity
+order. None of them is in the PCP configs; the first is in the metrics layer
+and predates this work.
+
+**1. The outcome metric is identically zero on PCP.**
+`ExperimentMetricsCallback.on_evaluation_end` and
+`analysis/saliency.py::_episode_returns` both build an episode return by
+averaging the summed reward over *every* group in `experiment.group_map`. With
+one group that is the group's return; with PCP's two it averages predators and
+prey, and `simple_tag` rewards are exactly zero-sum between them (+10 per
+capture to each predator, -10 to the prey). Every logged `return_mean`, in both
+collection and evaluation phases, in both rows, is exactly `0.0`.
+
+Downstream: `aggregate.py` reads `phase=evaluation, metric=return_mean` for
+final return, AUC, curves, and paired comparisons; `saliency.py` uses the same
+helper, so `saliency_return_delta` is `0 - 0 = 0` for every module -- identical
+to the value the docs define as the Identity/MLP control and wiring check.
+
+Not a data-loss problem: BenchMARL's own logger still writes
+`scalars/{collection,eval}_adversary_reward_episode_reward_mean.csv` per run.
+Deciding which groups define "the return" is a study-definition choice, so it
+is left open rather than silently made. The obvious candidate is "the trained
+group(s) only", which leaves Simple Spread numerically identical (one group)
+but changes what the metric means, so it needs a deliberate decision and a
+regression test on the Simple Spread path.
+
+**2. Deterministic evaluation never catches the prey at this budget.** In the
+same rows the per-group adversary return under stochastic collection sits at
+1.0-1.7, against 1.5 for a uniformly random policy measured directly, and under
+deterministic evaluation it is 0.0 at every evaluation point. `simple_tag`'s
+adversary reward is sparse by default (`shape_adversary_rew: false`; reward
+only on contact) and the protocol evaluates 5 episodes per point. Even with (1)
+fixed, the headline metric is a five-sample rare-event count. Options, all
+scientific decisions: enable `shape_adversary_rew`, raise
+`evaluation_episodes`, lengthen the budget, or report capture rate instead of
+return.
+
+**3. Compute was never the constraint, so the 60k budget bought nothing.**
+Measured on one core: a 60,000-frame PCP row is ~70 s, a 600,000-frame row
+~12 min. The full 231-row study is ~4.5 core-hours at 60k or ~45 at Simple
+Spread's horizon, against an 80,000 DPH monthly allocation. `gamma=0.9` also
+carries over untested; its ~10-step effective horizon is a different
+proposition against a sparse capture reward than against a dense coverage cost.
+
+Ordered resume point: fix (1) and add a Simple Spread regression test; decide
+(2); then run `pcp_02_pilot.sbatch` and read it; only then submit
+`pcp_03_main_comparison.sbatch` and `pcp_04_ablations.sbatch`. This is exactly
+the sequence V1 skipped on Simple Spread.
+
+## Return-metric fix (2026-09-03)
+
+Blocker 1 from the section above is resolved. The study's return is now computed
+over the trained groups only, declared per task as `return_groups` beside
+`params` in `configs/tasks/<task>.yaml`: `[agents]` for Simple Spread,
+`[adversary]` for PCP. Omitting the key keeps the previous all-groups behaviour.
+
+- New `src/commstudy/experiments/returns.py` owns the selection and both
+  reduction formulas. Collection now mirrors BenchMARL's own per-group figure
+  (`episode_reward.mean(-2)` at the global done) instead of reading
+  `experiment.mean_return`, which is an average over every group; evaluation
+  keeps the summed-reward formula the metrics callback and saliency already
+  shared. `saliency.py` measures the same groups, so the delta cannot be forced
+  to zero by an excluded group.
+- `metrics.csv` gains a per-group `return_mean` row alongside the ungrouped
+  study figure. `aggregate.py` and `diagnostics.metric_trace` now select the
+  ungrouped row explicitly, so the breakdown cannot be averaged into the curve.
+- An unknown or empty `return_groups` raises at run start rather than producing
+  a run with no headline metric.
+
+Verified on real rows of both tasks, against BenchMARL's own scalar logs:
+
+| Task | commstudy study return | BenchMARL per-group | BenchMARL all-group (old) |
+|---|---|---|---|
+| PCP (`adversary`) | 1.333, 0.667, 1.167, 1.5, 0.833 | identical | 0.0 x5 |
+| Simple Spread (`agents`) | -552.313, -610.148 | identical | identical |
+
+Simple Spread is therefore bit-identical to its completed V2 numbers; the fix is
+observable only where a task has more than one group. `src/tests/test_returns.py`
+pins both, including the equality with `experiment.mean_return` on the
+single-group task, and the zero-sum cancellation it prevents. Full suite: 501
+passing.
+
+Still open, unchanged by this fix: the sparse-capture evaluation signal
+(deterministic evaluation caught the prey zero times at the budgets measured;
+saliency on a 12k `pcp_comm_broadcast` row is 0.0 in both arms while
+`action_shift` is 2.03, so the channel moves behaviour but the outcome metric
+cannot see it) and the uncalibrated PCP training budget. Note that
+`scripts/saliency.py --episodes` does not control the episode count on a batched
+evaluation environment; `experiment.evaluation_episodes` does.

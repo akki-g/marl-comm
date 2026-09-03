@@ -49,6 +49,9 @@ def _evaluation_curve(rows: Sequence[Mapping[str, str]]) -> list[tuple[int, floa
         if (
             row.get("phase") == "evaluation"
             and row.get("metric") == "return_mean"
+            # The study figure is written without a group; per-group returns are
+            # recorded alongside it and must not be averaged into the curve.
+            and not row.get("group")
             and not row.get("sample")
         ):
             value = float(row["value"])

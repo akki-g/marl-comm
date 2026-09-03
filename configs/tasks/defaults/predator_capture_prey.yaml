@@ -1,7 +1,7 @@
 max_steps: 100
 num_good_agents: 1     # prey (scripted, not trained)
 num_adversaries: 3     # predators (trained group)
-num_obstacles: 2
+num_landmarks: 2
 prey_detection_radius: 0.8
 prey_obstacle_margin: 0.4
 prey_boundary_margin: 0.3

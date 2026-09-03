@@ -1,0 +1,42 @@
+# PCP's actor is a grouped ensemble, so every communication override targets
+# model_config.groups.adversary.params..., never model_config.params...: a flat
+# path would merge in as a stray key instead of failing, and the ablation would
+# silently run at its default value.
+#
+# max_n_frames is 60,000 rather than 600,000: PCP has no stability gate of its
+# own yet, so this is a cheap first pass, not a calibrated horizon. At this
+# budget the 12,000-frame evaluation interval leaves five evaluation points, so
+# the final-10% statistic reduces to a single point.
+# TODO: recalibrate once a stability gate exists for PCP.
+suite_id: pcp_comm_stage4_self_communication
+run_namespace: v2
+output_root: runs
+algorithm: mappo
+task: vmas_predator_capture_prey
+models: [pcp_comm_broadcast, pcp_comm_attention, pcp_comm_graph]
+seeds: [0, 1, 2]
+max_n_frames: 60000
+overrides:
+  # PCP trains two BenchMARL groups, so its actor and critic are grouped
+  # ensembles and the grouped critic must be selected explicitly. It belongs
+  # here rather than in a top-level key: expand_suite_config emits only
+  # algorithm/task/model/seed/max_n_frames plus this block, so a top-level
+  # `critic_model:` would be dropped without a word.
+  critic_model: pcp_critic
+  experiment.gamma: 0.9
+  algorithm_config.params.entropy_coef: 0.1
+  experiment.on_policy_n_minibatch_iters: 5
+  experiment.evaluation_interval: 12000
+  experiment.checkpoint_interval: 12000
+  experiment.checkpoint_at_end: true
+  experiment.keep_checkpoints_num: 2
+
+runs:
+  - ablation: self_communication
+    ablation_value: excluded
+    overrides:
+      model_config.groups.adversary.params.comm_kwargs.exclude_self: true
+  - ablation: self_communication
+    ablation_value: included
+    overrides:
+      model_config.groups.adversary.params.comm_kwargs.exclude_self: false
