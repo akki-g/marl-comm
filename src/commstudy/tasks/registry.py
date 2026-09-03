@@ -7,9 +7,11 @@ from typing import Any
 from benchmarl.environments.common import TaskClass
 from benchmarl.environments import VmasTask
 
+from commstudy.tasks.vmas import CustomVmasTask
 
 _TASK_REGISTRY = {
     "vmas_simple_spread": VmasTask.SIMPLE_SPREAD,
+    "vmas_predator_capture_prey": CustomVmasTask.PREDATOR_CAPTURE_PREY
 }
 
 
