@@ -1,0 +1,10 @@
+# configs/critic_models/benchmarl_mlp.yaml   (NEW — moved verbatim out of base.yaml)
+model_type: benchmarl_mlp
+params:
+  num_cells: [128, 128]
+  layer_class_path: torch.nn.Linear
+  activation_class_path: torch.nn.Tanh
+  activation_kwargs: null
+  norm_class_path: null
+  norm_kwargs: null
+  num_feature_dims: 1

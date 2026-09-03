@@ -11,7 +11,7 @@ from benchmarl.experiment import (
     ExperimentConfig as BenchMARLExperimentConfig,
 )
 from benchmarl.experiment.callback import Callback
-from benchmarl.models import MlpConfig
+from benchmarl.models import MlpConfig, EnsembleModelConfig
 from benchmarl.models.common import ModelConfig
 
 from commstudy.algorithms import resolve_algorithm
@@ -107,11 +107,40 @@ def build_model_config(
         return CommPolicyConfig(
             **dict(params)
         )
+    
+    if "groups" in config:
+        return EnsembleModelConfig(
+            {
+                group: _build_single_model_config(group_config)
+                for group, group_config in config["groups"].items()
+            }
+        )
+    return _build_single_model_config(config)
 
     raise ValueError(
         f"Unknown model_type '{model_type}'. "
         "Expected 'benchmarl_mlp' or 'communication'."
     )
+
+def _build_single_model_config(
+    config: Mapping[str, Any],
+) -> ModelConfig:
+    model_type = config.get("model_type")
+    params = config.get("params", {})
+
+    if not isinstance(params, Mapping):
+        raise TypeError("Model 'params' must be a mapping.")
+
+    if model_type == "benchmarl_mlp":
+        return _build_benchmarl_mlp(params)
+
+    if model_type == "communication":
+        return CommPolicyConfig(**dict(params))
+
+    raise ValueError(
+        f"Unknown model_type '{model_type}'. "
+        "Expected 'benchmarl_mlp' or 'communication'."
+    )   
 
 
 def _build_experiment_config(

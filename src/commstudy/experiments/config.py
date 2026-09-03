@@ -15,6 +15,7 @@ _SELECTION_KEYS = {
     "algorithm",
     "task",
     "model",
+    "critic_model",
 }
 
 
@@ -158,6 +159,7 @@ def load_experiment_spec(
         "algorithm": base.get("algorithm"),
         "task": base.get("task"),
         "model": base.get("model"),
+        "critic_model": base.get("critic_model"),
     }
 
     selections.update(
@@ -188,6 +190,12 @@ def load_experiment_spec(
         str(selections["model"]),
     )
 
+    critic_model_document = _load_component(
+    config_root,
+    "critic_models",          # new config_root subfolder
+    str(selections["critic_model"]),
+)
+
     # An algorithm YAML carries two distinct things: `params`, which are
     # algorithm-specific and belong in the BenchMARL AlgorithmConfig, and
     # `experiment`, which are general training settings that belong in
@@ -208,12 +216,14 @@ def load_experiment_spec(
             "algorithm": selections["algorithm"],
             "task": selections["task"],
             "model": selections["model"],
+            "critic_model": selections["critic_model"],
         },
         {
             "experiment": algorithm_experiment,
             "algorithm_config": algorithm_document,
             "task_config": task_document,
             "model_config": model_document,
+            "critic_model": critic_model_document,
         },
         cli_config,
     )
