@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable, Optional, Type
 
 from torchrl.envs import EnvBase
-from torchrl.envs.libs import VmasEnv
+from torchrl.envs.libs.vmas import VmasEnv
 
 from benchmarl.environments.common import Task, TaskClass
 from benchmarl.environments.vmas.common import VmasClass

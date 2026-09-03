@@ -8,14 +8,6 @@ Trains adversarial agents to attack prey
 from vmas.scenarios.mpe.simple_tag import Scenario as SimpleTagScenario
 import torch
 
-import copy 
-from typing import Callable, Dict, List, Optional
-
-from torchrl.envs import EnvBase
-from torchrl.envs.libs.vmas import VmasEnv
-
-from benchmarl.environments.vmas.common import VmasClass
-from benchmarl.utils import DEVICE_TYPING
 
 class PredatorCapturePreyScenario(SimpleTagScenario):
     def make_world(self, batch_dim, device, **kwargs):

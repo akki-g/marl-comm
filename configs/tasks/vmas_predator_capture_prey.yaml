@@ -1,0 +1,5 @@
+params:
+  max_steps: 100
+  num_good_agents: 1
+  num_adversaries: 3
+  num_obstacles: 2

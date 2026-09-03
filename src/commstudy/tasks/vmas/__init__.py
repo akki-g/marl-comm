@@ -1,5 +1,6 @@
-from .tasks import CustomVmasTaskClass
+from .tasks import CustomVmasTask, CustomVmasTaskClass
 
 __all__ = [
     "CustomVmasTask",
+    "CustomVmasTaskClass",
 ]
