@@ -1,7 +1,20 @@
 # Dependencies live in pyproject.toml (single source of truth).
 #
 # Preferred workflow:
-#     uv sync --extra dev
+#     uv sync --extra dev --extra analysis
 #
-# pip fallback (equivalent):
--e .[dev]
+# pip fallback (equivalent), and what slurm/01_setup.sbatch installs on Newton:
+-e .[dev,analysis]
+
+# `analysis` is not optional in practice: scripts/analyze.py imports matplotlib
+# to render the plots that scripts/report.py embeds, so a venv without it fails
+# the whole analyze step with "Plotting requires the analysis extra"
+# (src/commstudy/analysis/aggregate.py). This file said `.[dev]` alone until
+# 2026-09-03, which is a quieter way to hit the same wall.
+#
+# Deliberately not installed here:
+#   logging     tensorboard/wandb. Every suite runs `loggers: [csv]`.
+#   powergrid   MAPDN, fetched from GitHub because it is not on PyPI. Nothing
+#               imports it yet, and a PCP run should not be blocked on cloning
+#               a power-grids dependency. Add `--extra powergrid` when that
+#               task starts.

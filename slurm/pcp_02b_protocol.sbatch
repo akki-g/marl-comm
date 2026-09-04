@@ -50,6 +50,17 @@
 #     0.34 for +24% evaluation wall-clock.
 #   * all logged values finite, policy entropy stable, no action saturation.
 #
+# Two numbers in that report will read as findings and are not. Saliency is
+# exactly 0.0 for every row, because every row is the no-communication control
+# -- that is the wiring-check value, not a result. And the `agent` group's return
+# is the scripted prey's, mirrored: simple_tag is zero-sum, so it is the
+# predators' number negated, not a second measurement.
+#
+# REPORT.md is NOT written by this step. Training writes per-run metrics.csv and
+# summary.json only; the report comes from step 5:
+#
+#     sbatch slurm/pcp_05_analyze.sbatch   # -> results/pcp_protocol_gate/REPORT.md
+#
 # Then freeze the winning gamma and entropy_coef into every configs/sweeps/
 # pcp_comm_*.yaml, rerun pcp_01_setup, and only then submit step 3.
 

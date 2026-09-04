@@ -20,4 +20,9 @@ outputs/
 # Machine-specific module/venv names resolved by 01_setup.sbatch.
 /slurm/.resolved_env
 
-
+# BenchMARL writes a generated run directory next to the working directory when
+# an Experiment is built without an explicit save_folder. The test suite does
+# that repeatedly, so these land in the repo root and are easy to `git add` by
+# accident. They are scratch, never evidence -- real run output goes to runs/.
+mappo_*_ensemblemodel__*/
+*_ensemblemodel__*/

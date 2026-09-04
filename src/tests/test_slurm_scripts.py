@@ -454,3 +454,70 @@ def test_blocked_pcp_suites_say_so_where_someone_would_look(config_root):
         text = (config_root / "sweeps" / name).read_text(encoding="utf-8")
         assert "BLOCKED" in text, name
         assert "pcp_protocol_gate.yaml" in text, name
+
+
+def test_analyze_step_covers_every_pcp_suite(config_root):
+    """A suite missing from the analyze list trains and then reports nothing.
+
+    Training writes per-run metrics.csv and summary.json only; REPORT.md comes
+    from scripts/report.py in pcp_05_analyze. `pcp_protocol_gate` was added as
+    a sweep and initially left out of that list, so its 27 rows would have run
+    and then been skipped with "no runs yet".
+    """
+    analyze = (SLURM / "pcp_05_analyze.sbatch").read_text(encoding="utf-8")
+    suites = {
+        path.stem
+        for path in (config_root / "sweeps").glob("pcp_*.yaml")
+    }
+    missing = sorted(suite for suite in suites if suite not in analyze)
+    assert not missing, f"pcp_05_analyze.sbatch never analyzes: {missing}"
+
+
+def test_req_txt_matches_what_the_cluster_installs():
+    """req.txt is the documented pip fallback; if it disagrees with the setup
+    script, one of the two environments is missing packages.
+
+    It said `-e .[dev]` while slurm/01_setup.sbatch installed `.[dev,analysis]`,
+    so a venv built from req.txt could not run the analyze step at all.
+    """
+    req = (REPO_ROOT / "req.txt").read_text(encoding="utf-8")
+    setup = (SLURM / "01_setup.sbatch").read_text(encoding="utf-8")
+
+    installed = set(re.findall(r"\.\[([a-z,]+)\]", setup))
+    assert installed, "01_setup.sbatch no longer installs an extras group"
+    assert len(installed) == 1, f"setup installs inconsistent extras: {installed}"
+    extras = installed.pop()
+    assert f"-e .[{extras}]" in req, (
+        f"req.txt does not offer `-e .[{extras}]`, which is what the cluster installs"
+    )
+
+
+def test_no_core_dependency_needs_a_uv_only_source():
+    """pip is what builds the Newton venv, and it ignores [tool.uv.sources].
+
+    `mapdn` was added as a bare core dependency with its real location in
+    `[tool.uv.sources]`. uv resolves that; pip looks for `mapdn` on PyPI, gets a
+    404, and the whole `.[dev,analysis]` install fails -- taking the test and
+    analysis tooling with it. Direct references belong in the requirement string.
+    """
+    import tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    sources = pyproject.get("tool", {}).get("uv", {}).get("sources", {})
+    core = pyproject["project"]["dependencies"]
+    extras = pyproject["project"]["optional-dependencies"]
+
+    for name in sources:
+        for requirement in core:
+            assert not requirement.strip().startswith(name), (
+                f"core dependency '{name}' resolves only under uv; "
+                f"give it a PEP 508 direct reference so pip can install it too"
+            )
+
+    # Anything not on PyPI must carry its URL in the requirement itself.
+    for group, requirements in extras.items():
+        for requirement in requirements:
+            if "mapdn" in requirement:
+                assert "@" in requirement, (
+                    f"extra '{group}' declares mapdn without a direct reference"
+                )

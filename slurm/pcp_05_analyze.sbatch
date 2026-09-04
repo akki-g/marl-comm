@@ -50,6 +50,7 @@ source slurm/newton_env.sh
 EPISODES="${COMMSTUDY_SALIENCY_EPISODES:-32}"
 
 SUITES=(
+  pcp_protocol_gate
   pcp_identity_pilot
   pcp_comm_main
   pcp_comm_stage2_message_dim
