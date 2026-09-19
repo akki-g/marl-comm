@@ -1,6 +1,7 @@
 model_type: communication
 
 params:
+  actor_observation_keys: [observation]
   hidden_dim: 128
   num_encoder_layers: 2
 

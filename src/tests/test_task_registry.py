@@ -53,6 +53,7 @@ def test_unknown_task_raises_clearly():
 
 def test_available_tasks():
     assert available_tasks() == (
+        "mapdn_voltage_control",
         "vmas_predator_capture_prey",
         "vmas_simple_spread",
     )

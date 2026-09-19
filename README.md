@@ -1,5 +1,32 @@
 # marl-comm
 
+**Continuation — September 9, 2026:** the relocated runtime and original D4
+evidence have been recovered. Both original held-out banks now pass full review;
+the corrected two-worker queue has started the remaining allocation after both
+original archives passed preservation gates. D4 remains incomplete. The isolated
+[MAPDN implementation and bounded voltage-learning gate](docs/MAPDN_IMPLEMENTATION_STATUS.md)
+have passed on real case33 data, with a verified separate runtime bootstrap and
+source archive. Main's PCP package remains frozen for the ongoing D4 cohort. Follow the latest
+[main agent log](agents.md) entries for live process and artifact status.
+
+**Historical operational status, September 8, 22:16 UTC (superseded):** **2 of 40 D4 training
+rows completed and were archived; 38 remain unstarted.** Both completed rows
+passed the full training-integrity, final action/domain and retained-checkpoint
+audits. Their held-out evaluators are now suspended and incomplete; neither
+`heldout_evaluation.json` exists. The queue coordinator is also suspended.
+The hold recorded 783,843,328 free bytes (about 0.73 GiB). Restore at least
+8 GiB and verify frozen inputs before resuming: evaluators first, then the queue
+only after audits close, with no more than two active CPU workers. D4 remains
+incomplete. See the [evaluation resource hold](results/pcp_visibility_budget_cpu_v1/evaluation_resource_hold_01.json).
+
+**Historical operational update, September 8, 21:43 UTC (superseded):** new D4 submissions are on a
+reversible storage hold after available disk space fell below the initial
+allocation allowance. Both initial seed-20 runs completed 600k and were archived;
+their full final evaluations are running. The other 38 rows remain pending.
+Only the queue coordinator is suspended. Run status files remain
+authoritative; restore headroom and verify frozen inputs before resuming the
+existing coordinator. See the [resource hold record](results/pcp_visibility_budget_cpu_v1/resource_hold_01.json).
+
 Controlled learned-communication experiments for cooperative multi-agent
 reinforcement learning. Every row pairs one VMAS task, BenchMARL MAPPO, one
 centralized MLP critic, and a swappable actor-side `CommModule`; only the
@@ -11,7 +38,23 @@ carries the completed architecture comparison
 Predator-Capture-Prey (PCP) is a second task family for the same comparison:
 three trained predators pursuing one scripted prey, described under
 [Predator-Capture-Prey](#predator-capture-prey). Role/class-id conditioning on
-PCP and the PP task both remain out of scope.
+PCP and the PP task both remain out of scope. Current thesis-wide engineering
+status is tracked in [RESEARCH_GRADE_PROGRESS.md](docs/RESEARCH_GRADE_PROGRESS.md).
+
+**September 8, 2026:** the complete CPU v3 PCP confirmation passed and its
+fixed 600k baseline is promoted through a separate frozen copy with only its
+status changed. See the
+[confirmation results](docs/PCP_CONFIRMATION_CPU_V3_RESULTS.md).
+The controlled visibility/budget experiment is implemented; all eight real
+optimization smokes and the corrected revision-2 independent launch review passed.
+The preparation archive passed full read-back verification. The 40-row queue
+started September 8 at 21:33:45 UTC with two pinned CPU workers; its initial
+storage check passed at 9.6 GiB free. Two rows are now trained and archived;
+full training-integrity, action/domain and checkpoint audits passed. Their
+held-out evaluations are suspended incomplete, and 38 rows remain unstarted.
+The [D4 execution record](docs/PCP_VISIBILITY_BUDGET_STATUS.md) contains the
+frozen design, evidence, launch checks and analysis commands. D4's scientific
+completion gate remains pending; the older CPU v2 stays unconfirmed.
 
 The infrastructure underneath is used unmodified: the simulator is VMAS
 ([Bettini et al., DARS 2022](https://arxiv.org/abs/2207.03530)), the
@@ -93,7 +136,8 @@ uv run python scripts/train.py --suite-id simple_spread_smoke \
   model=comm_graph seed=0 experiment.max_n_frames=6000
 ```
 
-Any project/BenchMARL setting can be overridden with an OmegaConf dot key,
+Supported project/BenchMARL settings can be overridden with an OmegaConf dot key;
+unknown fields and unused grouped overrides fail during validation,
 for example:
 
 ```bash
@@ -114,9 +158,10 @@ checkpoint does not include Adam state.
 PCP is the project's second task. It subclasses VMAS's port of the MPE
 `simple_tag` predator-prey scenario
 ([Lowe et al., NeurIPS 2017](https://arxiv.org/abs/1706.02275)) and replaces the
-prey's learned policy with a hand-written pursuit-evasion rule, so the only
-trained group is the three predators. The scenario itself is unchanged
-otherwise; see `src/commstudy/tasks/vmas/scenarios/predator_capture_prey.py`.
+prey's executed action with a scripted pursuit-evasion rule. BenchMARL still
+optimizes both groups; the prey actor's output is discarded. PCP has versioned
+reset/RNG and visibility semantics, with a separate physical-state critic input;
+see `src/commstudy/tasks/vmas/scenarios/predator_capture_prey.py`.
 
 It exists to test whether a communication mechanism's advantage on Simple
 Spread generalizes to a structurally different coordination problem. Simple
@@ -132,7 +177,7 @@ not a bug.
 Select the task and its grouped models:
 
 ```bash
-uv run python scripts/train.py --suite-id pcp_smoke \
+uv run python scripts/train.py --validation-run --suite-id pcp_smoke \
   task=vmas_predator_capture_prey \
   model=pcp_comm_attention critic_model=pcp_critic \
   seed=0 experiment.max_n_frames=6000
@@ -151,8 +196,8 @@ Two consequences worth knowing before launching anything:
 
 - **Overrides are group-scoped.** What is `model_config.params.comm_kwargs.X`
   on Simple Spread is `model_config.groups.adversary.params.comm_kwargs.X` on
-  PCP. The flat path does not fail — OmegaConf merges it in as a stray key that
-  nothing reads — so an ablation written that way runs silently at its default.
+  PCP. The flat path is rejected by the strict grouped schema before model
+  construction; a silently unused ablation is an error.
 - **The prey group trains a policy that is thrown away.** BenchMARL builds and
   optimizes an actor and critic for the `agent` group like any other, but
   `PredatorCapturePreyScenario.process_action` overwrites its action with the
@@ -164,7 +209,7 @@ Two consequences worth knowing before launching anything:
 study's outcome, as `return_groups` beside `params` in
 `configs/tasks/<task>.yaml`: `[agents]` for Simple Spread, `[adversary]` for
 PCP. This matters because `simple_tag`'s two groups are exactly zero-sum — each
-predator scores `+10` per capture and the prey `−10` — so averaging over both,
+predator scores `+10` per rewarded contact per step and the prey `−10` — so averaging over both,
 which is what the metrics and saliency code did before 2026-09-03, reported
 `0.0` no matter how the predators performed. `metrics.csv` also records each
 group's own return as a separate row; the analysis reads the ungrouped study
@@ -177,16 +222,26 @@ scenario inherits stock `simple_tag` observations, which expose no role signal
 to condition on. Giving them one is a modeling decision (asymmetric speed or
 sensing radius), not a wiring change, and it is not part of this integration.
 
-The PCP suites live in `configs/sweeps/pcp_*.yaml` and mirror the V2 Simple
-Spread suites row for row, with one deliberate difference: `max_n_frames` is
-60,000 rather than 600,000. PCP has no stability gate of its own yet, so that
-is a cheap first pass rather than a calibrated horizon, and every file carries
-a `TODO` saying so. Review them the usual way:
+PCP scientific runs require a complete protocol-bound manifest and reviewed
+stage evidence. The [corrected protocol](configs/protocols/pcp_corrected_v1.yaml)
+is a **candidate**, with gamma 0.95, entropy 0.1, ten PPO passes, and a fixed
+600k-frame budget. The separate CPU v2 confirmation completed both runs and
+passed learning/action/domain checks, but its full gate remains **not confirmed**:
+required 480k checkpoint files were pruned before archival. The
+[results and preservation incident](docs/PCP_CONFIRMATION_CPU_V2_RESULTS.md)
+record the passing evidence and missing gate. CUDA remains unconfirmed. Planning
+is available:
 
 ```bash
-uv run python scripts/sweep.py configs/sweeps/pcp_identity_pilot.yaml --dry-run
-uv run python scripts/sweep.py configs/sweeps/pcp_comm_main.yaml --dry-run
+uv run python scripts/protocol.py inspect configs/protocols/pcp_corrected_v1.yaml
+uv run python scripts/sweep.py configs/sweeps/pcp_candidate_confirmation.yaml
 ```
+
+These commands do not approve or train a policy. Managed ad hoc PCP training
+requires `--validation-run` and is bounded to 6,000 frames. Full scientific
+execution uses the [protocol review and launch workflow](docs/PCP_PROTOCOL.md).
+The historical pilot/grid remain inspectable; old manifests cannot launch
+new scientific PCP rows. The following calibration history concerns Simple Spread.
 
 ## Baseline calibration and sweep workflow
 

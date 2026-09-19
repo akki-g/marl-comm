@@ -148,6 +148,20 @@ def _saliency_fields(run_dir: Path) -> dict[str, float]:
     if not path.exists():
         return {}
     document = _read_json(path)
+    if document.get("schema_version") != 2:
+        # Historical files compare action parameters along different states
+        # and do not carry auditable episode pairs. Keep those artifacts, but
+        # never pool their measurements with corrected same-input evaluation.
+        import warnings
+
+        warnings.warn(
+            f"Ignoring legacy intervention measurement at {path}; "
+            "remeasure with schema version 2 before aggregating.",
+            stacklevel=2,
+        )
+        return {}
+    if not document.get("saliency_complete_episodes"):
+        raise ValueError(f"Cannot aggregate incomplete episode intervention returns: {path}")
     fields: dict[str, float] = {}
     for metric in SALIENCY_METRICS:
         value = document.get(metric)

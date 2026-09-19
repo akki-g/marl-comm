@@ -197,3 +197,101 @@ def test_build_channel_supports_serializable_sequences():
     result = channel(messages())
     assert torch.equal(result.messages, torch.zeros_like(messages()))
     assert channel.requested_dropout_rate == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("phase", ["collection", "optimization", "evaluation"])
+@pytest.mark.parametrize("exploration", [InteractionType.RANDOM, InteractionType.DETERMINISTIC])
+def test_declared_phase_controls_channel_independently_of_policy_sampling(phase, exploration):
+    from commstudy.communication.channel import channel_phase
+
+    channel = DropoutChannel(p=1, mode="evaluation").train()
+    with torch.no_grad(), set_interaction_type(exploration), channel_phase(phase):
+        result = channel(messages())
+    assert bool(result.sender_mask.any()) == (phase != "evaluation")
+
+
+@pytest.mark.parametrize("kind", ["identity", "dropout", "gaussian", "sequential"])
+def test_dominant_intervention_overrides_replay_without_consuming_rng(kind):
+    from commstudy.communication.channel import channel_intervention
+
+    channel = {
+        "identity": IdentityChannel(),
+        "dropout": DropoutChannel(p=0.5, mode="always"),
+        "gaussian": GaussianNoiseChannel(std=1, mode="always"),
+        "sequential": build_channel([
+            {"type": "dropout", "p": 0.5, "mode": "always"},
+            {"type": "gaussian", "std": 1, "mode": "always"},
+        ]),
+    }[kind]
+    value = messages()
+    supplied = torch.ones(value.shape[:-1], dtype=torch.bool)
+    before = torch.get_rng_state().clone()
+    with channel_intervention([channel], False):
+        result = channel(value, sender_mask=supplied)
+        assert not result.sender_mask.any()
+        assert torch.equal(result.messages, torch.zeros_like(value))
+        assert channel._rng == {}
+    assert torch.equal(torch.get_rng_state(), before)
+    assert supplied.all()
+
+
+def test_sender_intervention_intersects_replay_and_nested_context_restores():
+    from commstudy.communication.channel import channel_intervention
+
+    channel = IdentityChannel()
+    value = messages()
+    mask = torch.tensor([False, True, False])
+    with channel_intervention([channel], mask):
+        with pytest.raises(RuntimeError), channel_intervention([channel], False):
+            raise RuntimeError("interrupted")
+        result = channel(value, sender_mask=torch.ones(3, dtype=torch.bool))
+        assert torch.equal(result.sender_mask, mask.expand(2, 3))
+    assert channel(value).sender_mask.all()
+
+
+def test_channel_stream_does_not_advance_policy_rng_and_evaluation_restores_it():
+    from commstudy.communication.channel import preserve_channel_rng
+
+    channel = DropoutChannel(p=0.5, mode="always")
+    value = torch.ones(100, 3, 4)
+    before = torch.get_rng_state().clone()
+    channel(value)
+    with preserve_channel_rng([channel]):
+        expected = channel(value).sender_mask
+    with preserve_channel_rng([channel], seed=987):
+        channel(value)
+    actual = channel(value).sender_mask
+    assert torch.equal(expected, actual)
+    assert torch.equal(torch.get_rng_state(), before)
+
+
+def test_composed_dropout_stages_have_independent_streams():
+    channel = build_channel([
+        {"type": "dropout", "p": 0.5, "mode": "always"},
+        {"type": "dropout", "p": 0.5, "mode": "always"},
+    ])
+    result = channel(torch.ones(10000, 3, 1))
+    assert float(result.sender_mask.float().mean()) == pytest.approx(0.25, abs=0.02)
+
+
+def test_severing_does_not_hide_invalid_replay_mask():
+    from commstudy.communication.channel import channel_intervention
+
+    channel = DropoutChannel(p=0.5, mode="always")
+    with channel_intervention([channel], False):
+        with pytest.raises(TypeError, match="boolean"):
+            channel(messages(), sender_mask=torch.ones(8))
+        with pytest.raises(ValueError, match="must end"):
+            channel(messages(), sender_mask=torch.ones(8, dtype=torch.bool))
+
+
+def test_rng_preservation_restores_channel_runtime_cache():
+    from commstudy.communication.channel import preserve_channel_rng
+
+    channel = DropoutChannel(p=0.5, mode="always")
+    channel(torch.ones(3, 4))
+    before = channel.last_sender_mask.clone()
+    with preserve_channel_rng([channel], seed=22):
+        channel(messages())
+        assert channel.last_sender_mask.shape == (2, 3)
+    assert torch.equal(channel.last_sender_mask, before)

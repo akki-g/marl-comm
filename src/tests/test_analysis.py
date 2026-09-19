@@ -14,6 +14,32 @@ from commstudy.analysis import (
 from commstudy.experiments.metrics import TidyMetricsWriter
 
 
+def test_legacy_influence_is_never_pooled_with_same_input_measurements(tmp_path):
+    from commstudy.analysis.aggregate import _saliency_fields
+
+    path = tmp_path / "saliency.json"
+    path.write_text(json.dumps({"schema_version": 1, "saliency_action_shift_mean": 999.0}))
+    with pytest.warns(UserWarning, match="legacy intervention"):
+        assert _saliency_fields(tmp_path) == {}
+    path.write_text(json.dumps({
+        "schema_version": 2, "saliency_complete_episodes": True,
+        "saliency_action_shift_mean": 0.25, "saliency_return_delta": 1.0,
+    }))
+    assert _saliency_fields(tmp_path) == {
+        "saliency_action_shift_mean": 0.25, "saliency_return_delta": 1.0,
+    }
+
+
+def test_intervention_aggregation_rejects_partial_episode_returns(tmp_path):
+    from commstudy.analysis.aggregate import _saliency_fields
+
+    (tmp_path / "saliency.json").write_text(json.dumps({
+        "schema_version": 2, "saliency_complete_episodes": False, "saliency_return_delta": 1.0,
+    }))
+    with pytest.raises(ValueError, match="incomplete episode"):
+        _saliency_fields(tmp_path)
+
+
 def _run(
     suite_dir,
     model,

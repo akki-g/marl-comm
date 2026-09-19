@@ -12,8 +12,11 @@ from commstudy.experiments import (
     build_experiment,
     build_model_config,
     load_experiment_spec,
+    experiment_spec_from_dict,
+    scientific_config_sha256,
 )
-from commstudy.experiments.sweeps import expand_suite_config
+from commstudy.experiments.sweeps import expand_suite_config, validate_plan
+from commstudy.experiments.protocols import ProtocolGateError, load_protocol, protocol_spec
 from commstudy.models import CommPolicyConfig, CommPolicyModel
 from commstudy.tasks import resolve_task
 from commstudy.utils.imports import import_from_path
@@ -47,6 +50,8 @@ PCP_ABLATION_SUITES = {
 
 PCP_SUITES = {
     "pcp_identity_pilot.yaml": 2,
+    "pcp_protocol_gate.yaml": 27,
+    "pcp_candidate_confirmation.yaml": 2,
     "pcp_comm_main.yaml": 30,
     **PCP_ABLATION_SUITES,
 }
@@ -136,26 +141,35 @@ def test_pcp_suites_expand_with_the_grouped_critic_selected(
     config_root,
     tmp_path,
 ):
-    """Every PCP row must pin ``pcp_critic``.
-
-    ``expand_suite_config`` emits only algorithm/task/model/seed/max_n_frames
-    plus the ``overrides`` block, so a critic selected as a top-level suite key
-    would never reach the run and the row would quietly fall back to
-    ``base.yaml``'s flat default.
-    """
+    """Every snapshot and its explanatory overrides select the actual grouped critic."""
+    document = _load_yaml(config_root / "sweeps" / filename)
     plans = expand_suite_config(
-        _load_yaml(config_root / "sweeps" / filename),
+        document,
         repo_root=tmp_path,
     )
 
     assert len(plans) == expected_count
     assert len({plan.run_id for plan in plans}) == expected_count
     for plan in plans:
-        assert plan.suite_id == filename.removesuffix(".yaml")
+        assert plan.suite_id == document["suite_id"]
         assert plan.task == PCP_TASK
         assert plan.algorithm == "mappo"
         assert plan.model.startswith("pcp_")
         assert 'critic_model="pcp_critic"' in plan.overrides
+        spec = experiment_spec_from_dict(plan.resolved_spec)
+        assert scientific_config_sha256(spec) == plan.scientific_hash
+        assert scientific_config_sha256(load_experiment_spec(config_root, plan.overrides)) == (
+            plan.scientific_hash
+        )
+        if "protocol" in document:
+            assert plan.protocol["stage"] == document["stage"]
+            assert plan.model_contract["task_contract"]["randomness_protocol"] == "pcp_rng_v2"
+            protocol = load_protocol(config_root.parent / document["protocol"])
+            expected = protocol_spec(protocol, model=plan.model, seed=plan.seed,
+                                     ablation=plan.ablation, ablation_value=plan.ablation_value)
+            assert scientific_config_sha256(expected) == plan.scientific_hash
+        else:
+            assert plan.protocol is None
 
     spec = load_experiment_spec(config_root, plans[0].overrides)
     assert set(spec.critic_model) == {"groups"}
@@ -194,7 +208,7 @@ def test_heads_ablation_overrides_the_adversary_group_not_a_stray_key(
 
     assert {plan.ablation_value for plan in plans} == {"1", "2", "4", "8"}
     for plan in plans:
-        spec = load_experiment_spec(config_root, plan.overrides)
+        spec = experiment_spec_from_dict(plan.resolved_spec)
         groups = spec.model_config["groups"]
 
         assert set(spec.model_config) == {"groups"}
@@ -229,16 +243,19 @@ def test_pcp_ablation_rows_construct_their_communication_module(
     )
 
     assert len(plans) == expected_count
-    assert {plan.seed for plan in plans} == {0, 1, 2}
-    assert {plan.max_n_frames for plan in plans} == {60_000}
-    if "dropout" not in filename:
-        assert all("dropout" not in " ".join(plan.overrides) for plan in plans)
+    assert {plan.seed for plan in plans} == {20, 21, 22}
+    assert {plan.max_n_frames for plan in plans} == {600_000}
 
     for plan in plans:
-        spec = load_experiment_spec(config_root, plan.overrides)
+        spec = experiment_spec_from_dict(plan.resolved_spec)
         params = spec.model_config["groups"][ADVERSARY_GROUP]["params"]
         comm_class = import_from_path(params["comm_class_path"])
-        comm_class(hidden_dim=params["hidden_dim"], **params["comm_kwargs"])
+        module = comm_class(hidden_dim=params["hidden_dim"], **params["comm_kwargs"])
+        assert spec.experiment["gamma"] == 0.95
+        assert spec.algorithm_config["params"]["entropy_coef"] == 0.1
+        assert spec.experiment["on_policy_n_minibatch_iters"] == 10
+        if "dropout" not in filename:
+            assert module.channel.requested_dropout_rate == 0
 
 
 def test_mappo_real_iteration_trains_the_pcp_adversary_communication_module(
@@ -316,21 +333,15 @@ def test_pcp_sweep_files_cover_every_communication_model(config_root, tmp_path):
     )
 
     assert {plan.model for plan in plans} == {"pcp_actor", *PCP_COMM_MODELS}
-    assert {plan.seed for plan in plans} == {0, 1, 2, 3, 4}
+    assert {plan.seed for plan in plans} == {20, 21, 22, 23, 24}
     assert {plan.ablation for plan in plans} == {"main"}
-    assert {plan.max_n_frames for plan in plans} == {60_000}
+    assert {plan.max_n_frames for plan in plans} == {600_000}
 
 
-def test_pilot_shares_the_main_comparisons_optimizer_protocol(config_root, tmp_path):
-    """The pilot decides the main suite's budget, so it must differ only in that.
-
-    The Simple Spread pilot this one mirrors predates the frozen protocol, so
-    copying its settings verbatim would have measured a configuration no PCP
-    suite runs -- gamma above all, which is itself one of the open questions on
-    this task.
-    """
+def test_corrected_confirmation_and_main_share_one_candidate_protocol(config_root, tmp_path):
+    """Fresh confirmation and held-out comparison differ only by method/seed."""
     pilot = expand_suite_config(
-        _load_yaml(config_root / "sweeps/pcp_identity_pilot.yaml"),
+        _load_yaml(config_root / "sweeps/pcp_candidate_confirmation.yaml"),
         repo_root=tmp_path,
     )
     main = expand_suite_config(
@@ -338,22 +349,41 @@ def test_pilot_shares_the_main_comparisons_optimizer_protocol(config_root, tmp_p
         repo_root=tmp_path,
     )
 
-    main_spec = load_experiment_spec(config_root, main[0].overrides)
+    main_spec = experiment_spec_from_dict(next(
+        plan.resolved_spec for plan in main if plan.model == "pcp_comm_identity"
+    ))
+    assert {plan.seed for plan in pilot} == {10, 11}
+    assert {plan.model for plan in pilot} == {"pcp_comm_identity"}
+    assert {plan.max_n_frames for plan in pilot} == {600_000}
     for plan in pilot:
-        spec = load_experiment_spec(config_root, plan.overrides)
-        assert spec.experiment["gamma"] == main_spec.experiment["gamma"]
-        assert (
-            spec.algorithm_config["params"]["entropy_coef"]
-            == main_spec.algorithm_config["params"]["entropy_coef"]
+        spec = experiment_spec_from_dict(plan.resolved_spec)
+        assert scientific_config_sha256(spec, include_seed=False) == (
+            scientific_config_sha256(main_spec, include_seed=False)
         )
-        assert (
-            spec.experiment["on_policy_n_minibatch_iters"]
-            == main_spec.experiment["on_policy_n_minibatch_iters"]
-        )
-        assert spec.experiment["evaluation_interval"] == 12_000
+        assert plan.protocol["stage"] == "confirmation"
+        assert plan.protocol["sha256"] == main[0].protocol["sha256"]
+        assert spec.experiment["gamma"] == 0.95
+        assert spec.experiment["evaluation_episodes"] == 128
+        assert spec.experiment["on_policy_n_minibatch_iters"] == 10
+    protocol = load_protocol(config_root / "protocols/pcp_corrected_v1.yaml")
+    assert protocol["status"] == "candidate"
 
-    # The budget is the variable under test.
-    assert {plan.max_n_frames for plan in pilot} == {60_000, 120_000}
+
+@pytest.mark.parametrize("filename", ["pcp_identity_pilot.yaml", "pcp_protocol_gate.yaml"])
+def test_historical_pcp_calibrations_remain_inspectable_but_cannot_launch(
+    config_root, tmp_path, filename,
+):
+    plans = expand_suite_config(_load_yaml(config_root / "sweeps" / filename), repo_root=tmp_path)
+    for plan in plans:
+        assert plan.protocol is None
+        with pytest.raises(ProtocolGateError, match="requires a versioned protocol"):
+            validate_plan(plan, config_root=config_root, repo_root=config_root.parent)
+    if filename == "pcp_identity_pilot.yaml":
+        assert {plan.max_n_frames for plan in plans} == {60_000, 120_000}
+        for plan in plans:
+            spec = experiment_spec_from_dict(plan.resolved_spec)
+            assert spec.experiment["gamma"] == 0.9
+            assert spec.experiment["on_policy_n_minibatch_iters"] == 5
 
 
 def _pcp_env(**kwargs):
@@ -382,17 +412,15 @@ def _pcp_env(**kwargs):
     return env
 
 
-def test_predator_sensing_radius_defaults_to_stock_full_observability():
-    """Omitting the radius must not silently change the task.
-
-    The 2026-09-03 pilot ran without it, so its numbers describe this
-    observation, and `docs/RESULTS_pcp_pilot.md` compares against it.
-    """
+def test_predator_sensing_radius_defaults_to_global_visibility_with_stable_flags():
+    """Protocol v2 keeps the actor schema fixed across visibility conditions."""
     env = _pcp_env()
     adversary = env.scenario.adversaries()[0]
     assert env.scenario.predator_sensing_radius is None
     # vel(2) + pos(2) + 2 landmarks(4) + 2 teammates(4) + prey pos(2) + prey vel(2)
-    assert env.scenario.observation(adversary).shape[-1] == 16
+    observation = env.scenario.observation(adversary)
+    assert observation.shape[-1] == 17
+    assert bool(observation[..., -1].eq(1).all())
 
 
 def test_predator_sensing_radius_hides_only_the_prey_and_flags_it():

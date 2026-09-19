@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from benchmarl.models.common import ModelConfig
 
@@ -13,6 +14,14 @@ class CommPolicyConfig(ModelConfig):
     num_encoder_layers: int = 2
 
     activation_class_path: str = "torch.nn.Tanh"
+
+    # Relative to the model's agent group. Wrappers cannot expand the actor's
+    # information set merely by adding new leaves to an observation spec.
+    # OmegaConf cannot represent unions containing nested lists. The model
+    # validates each relative string or explicit nested key at construction.
+    actor_observation_keys: list[Any] = field(
+        default_factory=lambda: ["observation"]
+    )
 
     comm_class_path: str = (
         "commstudy.communication.identity.IdentityComm"

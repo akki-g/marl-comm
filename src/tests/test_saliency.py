@@ -107,6 +107,21 @@ def test_severing_preserves_gradient_flow_to_the_local_path():
     assert torch.isfinite(hidden.grad).all()
 
 
+@pytest.mark.parametrize("name", sorted(LEARNED))
+def test_severing_dominates_supplied_all_true_sender_realization(name):
+    from commstudy.communication.base import CommContext
+
+    module = _module(name, channel={"type": "dropout", "p": 0.5, "mode": "always"})
+    hidden = torch.randn(2, 3, 16)
+    context = CommContext(extras={"sender_mask": torch.ones(2, 3, dtype=torch.bool)})
+    before = torch.get_rng_state().clone()
+    original = module.channel
+    with severed_communication([module, module]):
+        assert module.channel is original
+        assert torch.equal(module(hidden, context), hidden)
+    assert torch.equal(torch.get_rng_state(), before)
+
+
 def test_gaussian_kl_is_zero_for_identical_distributions():
     location = torch.randn(4, 2, dtype=torch.float64)
     scale = torch.rand(4, 2, dtype=torch.float64) + 0.5
@@ -191,7 +206,9 @@ def test_real_frozen_policy_saliency_is_exactly_zero_without_communication(
         )
     )
     try:
-        result = communication_saliency(experiment, episodes=2, steps=10, seed=0)
+        result = communication_saliency(
+            experiment, episodes=2, steps=10, seed=0, require_complete=False
+        )
     finally:
         experiment.test_env.close()
 
@@ -220,7 +237,9 @@ def test_real_frozen_learned_policy_saliency_is_measurable(tmp_path, config_root
         )
     )
     try:
-        result = communication_saliency(experiment, episodes=2, steps=10, seed=0)
+        result = communication_saliency(
+            experiment, episodes=2, steps=10, seed=0, require_complete=False
+        )
     finally:
         experiment.test_env.close()
 

@@ -349,7 +349,7 @@ cost. `configs/sweeps/simple_spread_comm_v2_wallclock.yaml` runs one short
 compute-overhead number. It carries its own `wallclock_benchmark` ablation
 label and is never aggregated into the scientific comparison.
 
-## Communication saliency
+## Channel reliance and same-input influence (measurement version 2)
 
 Every metric above measures communication *activity*: how many messages, how
 wide, how concentrated the attention. None of them establishes that the channel
@@ -357,53 +357,119 @@ contributes to the task. A module can transmit maximally and coordinate
 nothing, and on Simple Spread this is a live possibility because the
 observation already exposes relative information about other agents.
 
-Saliency measures the causal contribution by intervening on a frozen, fully
-trained policy:
+Channel reliance measures the return effect of intervening on one frozen policy:
 
 \[
 \mathrm{saliency} = J(\pi) - J(\pi_{\varnothing}),
 \]
 
 where \(\pi_{\varnothing}\) is the same policy with every sender suppressed.
-Suppression is implemented with the existing channel abstraction (`p=1`
-dropout). Because each module decodes communication through a bias-free
+Suppression uses a dominant intervention mask on the original channel. It
+overrides supplied availability/replay masks and consumes no random numbers
+when fully severed. Because each module decodes communication through a bias-free
 projection, an empty neighbourhood yields an exactly zero communication delta,
 so every learned module reduces to \(h'_i = h_i\) — exactly `IdentityComm`.
 Learned weights are never modified; only the channel is removed. This makes the
 intervention exact rather than approximate, and identical across modules.
 
-Both arms are rolled out from the same environment seed, so the comparison is
-paired and reflects the intervention rather than episode variance. Both returns
-are computed over the groups the task declares as its study return
-(`return_groups`), which is every agent on Simple Spread and the predators alone
-on Predator-Capture-Prey. Averaging over a scripted opponent group instead would
+`paired_episode_reliance` creates a fresh one-world task environment for each
+arm and episode. Its explicit seed bank produces exactly the requested number
+of episodes regardless of the training experiment's evaluation batch width.
+Records retain episode IDs, seeds, initial-input hashes, transition counts,
+completion flags, and returns. Mismatched IDs or initial conditions fail;
+incomplete episodes fail by default. Corrected PCP isolates reset randomness and
+indexes prey disturbances by episode, prey, and timestep. Both arms therefore
+share exogenous noise even after their actions and physical trajectories diverge.
+Other task bindings must validate the same environmental contract before use.
+
+The evaluator requires one measured group: `agents` on Simple Spread or
+`adversary` on PCP. Averaging over a scripted opponent group instead would
 force both arms to zero on a zero-sum task, and a zero delta is precisely the
 value that marks a non-communicating control.
 
 Reported fields:
 
-- `saliency_return_delta` — return lost when the channel is severed; the
-  headline task-benefit number
+- `saliency_return_delta` — return lost when this policy's channel is severed
 - `saliency_return_delta_fraction` — the same, relative to the severed return's
   magnitude, so the sign survives Simple Spread's negative-cost returns
-- `saliency_action_shift_mean` — mean action displacement on identical states
+- `saliency_action_shift_mean` — mean L2 displacement of the selected group's
+  joint deterministic action across identical recorded inputs
 - `saliency_policy_kl_mean` — KL between the pre-tanh action distributions of
   the two arms
 
-The last two separate *behavioural influence* from *task benefit*. A large
-action shift with a near-zero return delta means the module is communicating
-without coordinating. That distinction follows Lowe et al., *On the Pitfalls of
-Measuring Emergent Communication* (2019), which argues that message statistics
-alone cannot establish that communication is used; saliency here is measured by
-intervention rather than by their mutual-information estimators.
+`same_input_influence` evaluates cloned observations and supplied communication
+context twice without stepping the environment. Policy outputs are recomputed;
+only the selected group's action/loc/scale leaves are read. The default dataset
+comes from the live policy's trajectories and is labelled accordingly; callers
+can supply a separately declared dataset or mixture. The script saves the inputs
+in `saliency_inputs_<hash>.pt` and records their keys, count, and SHA256. Influence uses
+deterministic actions even when episode reliance uses stochastic actions. KL is
+the diagonal Gaussian KL, equal to the transformed KL for the same invertible
+tanh transform and bounds. Non-finite observations/rewards/outputs must not be
+interpreted as healthy measurements.
+
+These quantities answer different questions. A return effect establishes this
+policy's channel reliance, not the impossibility of learning a competent local
+policy. Action influence with little mean return effect can reflect redundancy,
+offsetting effects, or a poor use of information. The retained return fraction
+depends on reward origin and is not a cross-task necessity threshold. Prior
+communication-measurement work also uses interventions; no novelty claim rests
+on this distinction alone.
 
 `BenchMARL MLP` and `IdentityComm` must return exactly zero saliency. That is
 the correct control value and doubles as a wiring check on the intervention.
 
-Saliency is measured **after** training from the saved final actor, never
-during it. Running extra rollouts inside a training callback would consume RNG
-draws and perturb the trajectory, breaking comparability with runs already
-collected.
+The post-training evaluator preserves training RNG and communication statistics.
+The normal BenchMARL evaluation lifecycle also preserves global, VMAS, and
+private channel streams, including failure exits. No MAPPO loss was changed.
+
+Historical schema-1 action-shift/KL files compared different trajectories. They
+remain historical artifacts and are excluded from new aggregation until
+remeasured; corrected schema-2 measurements cannot be pooled with them. Old PCP
+calibration is not a confirmation of the corrected task/critic protocol. See
+[the implementation record](RESEARCH_GRADE_PROGRESS.md).
+
+## Controlled PCP visibility and budget comparison
+
+The [deliverable 4 plan](PCP_VISIBILITY_BUDGET_PLAN.md) adds two explicit controls
+without changing the existing Identity or Broadcast implementations.
+`LocalCapacityComm` computes a bias-free 128-to-32-to-128 Tanh branch on each
+agent's own hidden state and adds the result locally. Its 8,192 branch parameters
+match Broadcast's branch exactly and participate in optimization, while its
+network payload is zero. Bookkeeping counts these parameters in the common
+communication-slot field; in scientific tables they are **local capacity**.
+The complete predator actors have 27,524 parameters for LocalCapacity and
+Broadcast, versus 19,332 for Identity. Critic and scripted-prey architectures
+remain common across these methods.
+
+`BudgetedBroadcastComm` supports the declared endpoints zero or all senders.
+At zero it bypasses the projections and channel, records unavailable senders,
+and returns the hidden input exactly. Its unused branch weights make it a
+separately trained zero-budget mechanism control; LocalCapacity supplies the
+active capacity control. At the full population budget it delegates to the
+existing one-round Broadcast operation. Unsupported intermediate budgets fail;
+there is no implicit scheduler or free preview communication.
+
+For three senders with 32 float32 scalars per packet, full communication emits
+3,072 payload bits per transition and delivers 6,144 delivery-equivalent bits
+to the six directed non-self edges. Suppressing one sender gives 2,048 emitted
+and 4,096 delivered bits; severing and zero budget give zero. These counts omit
+network headers and transport overhead. The evaluator checks actual masks
+against module costs on every complete episode.
+
+The radius-1 and globally visible prey conditions share a 17-feature actor
+schema and the same 22-feature physical-state critic. Globally visible prey
+provides a privileged-prey-information reference, while teammate private
+velocity and implicit motion signals still limit stronger information claims.
+
+Held-out interventions use complete episodes paired by physical state, hidden
+wander state and exogenous noise identity. The three local/zero-budget controls
+must be exact nulls under severing. Full-budget policies additionally undergo
+single-sender suppression and a semantic substitution: at each timestep, use
+messages from the next episode in a fixed cyclic live-episode bank, preserving
+sender identity. The bank and donor hashes are saved. This perturbation changes
+message content rather than permuting an invariant mean, and its induced
+distribution shift is reported explicitly.
 
 ## Simple Spread interpretation limit
 

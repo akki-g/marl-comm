@@ -17,9 +17,16 @@ from .diagnostics import (
 )
 from .report import render_report, write_report
 from .saliency import (
+    EvaluationEpisode,
+    EpisodeOutcome,
+    PairedEpisodeEvaluation,
+    SameInputInfluence,
     SaliencyResult,
     communication_modules,
     communication_saliency,
+    paired_episode_reliance,
+    paired_return_deltas,
+    same_input_influence,
     severed_communication,
 )
 
@@ -28,6 +35,13 @@ __all__ = [
     "AnalysisOutputs",
     "MetricTrace",
     "SaliencyResult",
+    "EvaluationEpisode",
+    "EpisodeOutcome",
+    "PairedEpisodeEvaluation",
+    "SameInputInfluence",
+    "paired_episode_reliance",
+    "paired_return_deltas",
+    "same_input_influence",
     "communication_modules",
     "communication_saliency",
     "severed_communication",

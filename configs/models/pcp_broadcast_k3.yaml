@@ -1,0 +1,37 @@
+# Matches the declared method in pcp_visibility_budget_cpu_v1_frozen.yaml.
+groups:
+  adversary:
+    model_type: communication
+    params:
+      hidden_dim: 128
+      num_encoder_layers: 2
+      activation_class_path: torch.nn.Tanh
+      actor_observation_keys:
+      - observation
+      comm_class_path: commstudy.communication.budgeted_broadcast.BudgetedBroadcastComm
+      comm_kwargs:
+        grad_clip: null
+        normalize_comm_path: false
+        message_dim: 32
+        exclude_self: true
+        residual: true
+        channel:
+          type: identity
+          mode: always
+        sender_budget: 3
+      comm_context_keys:
+        mask: comm_mask
+        sender_mask: comm_sender_mask
+      use_role_embedding: false
+      num_roles: 2
+  agent:
+    model_type: benchmarl_mlp
+    params:
+      num_cells:
+      - 8
+      activation_kwargs: null
+      norm_kwargs: null
+      num_feature_dims: 1
+      activation_class_path: torch.nn.Tanh
+      norm_class_path: null
+      layer_class_path: torch.nn.Linear

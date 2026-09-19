@@ -271,10 +271,17 @@ def test_generated_sender_mask_is_resampled_for_a_fresh_action_step():
         batch_size=[BATCH_SIZE],
     )
 
-    torch.manual_seed(23)
-    expected = torch.rand(BATCH_SIZE, N_AGENTS) >= 0.5
-    torch.manual_seed(23)
-    model(fresh_td)
+    from commstudy.communication.channel import preserve_channel_rng
+
+    clean_td = TensorDict({(GROUP, "observation"): observation}, batch_size=[BATCH_SIZE])
+    # The fresh step must ignore collector-carried masks. Compare it with a
+    # clean input under the same PRIVATE channel stream; policy RNG is separate.
+    with preserve_channel_rng([model.comm.channel], seed=23):
+        model(clean_td)
+        expected = clean_td.get((GROUP, "comm_sender_mask")).clone()
+    with preserve_channel_rng([model.comm.channel], seed=23):
+        torch.rand(91)
+        model(fresh_td)
 
     assert torch.equal(
         fresh_td.get((GROUP, "comm_sender_mask")),

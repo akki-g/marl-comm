@@ -1,128 +1,59 @@
-# PCP's actor is a grouped ensemble, so every communication override targets
-# model_config.groups.adversary.params..., never model_config.params...: a flat
-# path would merge in as a stray key instead of failing, and the ablation would
-# silently run at its default value.
-#
-# BLOCKED: do not submit this suite yet. Three settings below are placeholders
-# that the 2026-09-03 pilot showed to be wrong, and all three are decided by
-# configs/sweeps/pcp_protocol_gate.yaml. See docs/RESULTS_pcp_pilot.md.
-#
-#   max_n_frames 60000  is roughly a tenth of what the task needs. The pilot's
-#                       return was still climbing at +1.75 per 100k frames with
-#                       no plateau; 600k is a floor, not an estimate.
-#   gamma 0.9           inherited untested from Simple Spread. The prey is
-#                       faster than the predators, so a capture needs a pincer
-#                       that gamma 0.9's ~10-step horizon cannot see.
-#   entropy_coef 0.1    never measured against this reward, which is sparse
-#                       enough that 94% of random episodes score exactly zero.
-#
-# Take all three from the protocol gate's winner, then delete this block.
-suite_id: pcp_comm_stage4_sender_budget
-run_namespace: v2
+# Generated scientific settings come from the named protocol. Launch remains evidence-gated.
+suite_id: pcp_comm_stage4_sender_budget_corrected_v1
+run_namespace: pcp_corrected_v1
 output_root: runs
-algorithm: mappo
-task: vmas_predator_capture_prey
-seeds: [0, 1, 2]
-max_n_frames: 60000
-overrides:
-  # PCP trains two BenchMARL groups, so its actor and critic are grouped
-  # ensembles and the grouped critic must be selected explicitly. It belongs
-  # here rather than in a top-level key: expand_suite_config emits only
-  # algorithm/task/model/seed/max_n_frames plus this block, so a top-level
-  # `critic_model:` would be dropped without a word.
-  critic_model: pcp_critic
-  experiment.gamma: 0.9
-  algorithm_config.params.entropy_coef: 0.1
-  experiment.on_policy_n_minibatch_iters: 5
-  # Five episodes put the standard error at 1.69 against effects of 1-3 return
-  # points, because 94% of episodes score exactly zero. The evaluation env is
-  # batched, so this widens the batch rather than adding rollouts: measured at
-  # +24% evaluation wall-clock for 25x the samples. See docs/RESULTS_pcp_pilot.md.
-  experiment.evaluation_episodes: 128
-  experiment.evaluation_interval: 12000
-  experiment.checkpoint_interval: 12000
-  experiment.checkpoint_at_end: true
-  experiment.keep_checkpoints_num: 2
-
+protocol: configs/protocols/pcp_corrected_v1.yaml
+stage: ablation
+seeds:
+- 20
+- 21
+- 22
 runs:
-  - models: [pcp_comm_gated]
-    ablation: sender_budget
-    ablation_value: learned_k1
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 1
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: learned
-  - models: [pcp_comm_gated]
-    ablation: sender_budget
-    ablation_value: learned_k2
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 2
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: learned
-  - models: [pcp_comm_gated]
-    ablation: sender_budget
-    ablation_value: learned_k3
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 3
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: learned
-  - models: [pcp_comm_gated]
-    ablation: sender_budget
-    ablation_value: random_k1_seed0
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 1
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: random
-      model_config.groups.adversary.params.comm_kwargs.sender_selection_seed: 0
-  - models: [pcp_comm_gated]
-    ablation: sender_budget
-    ablation_value: random_k2_seed0
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 2
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: random
-      model_config.groups.adversary.params.comm_kwargs.sender_selection_seed: 0
-  - models: [pcp_comm_gated]
-    ablation: sender_budget
-    ablation_value: random_k3_seed0
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 3
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: random
-      model_config.groups.adversary.params.comm_kwargs.sender_selection_seed: 0
-
-  # AttentionComm calls learned scheduling "attention" internally. The
-  # ablation label remains "learned" to distinguish it from random-K control.
-  - models: [pcp_comm_attention]
-    ablation: sender_budget
-    ablation_value: learned_k1
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 1
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: attention
-  - models: [pcp_comm_attention]
-    ablation: sender_budget
-    ablation_value: learned_k2
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 2
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: attention
-  - models: [pcp_comm_attention]
-    ablation: sender_budget
-    ablation_value: learned_k3
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 3
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: attention
-  - models: [pcp_comm_attention]
-    ablation: sender_budget
-    ablation_value: random_k1_seed0
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 1
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: random
-      model_config.groups.adversary.params.comm_kwargs.sender_selection_seed: 0
-  - models: [pcp_comm_attention]
-    ablation: sender_budget
-    ablation_value: random_k2_seed0
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 2
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: random
-      model_config.groups.adversary.params.comm_kwargs.sender_selection_seed: 0
-  - models: [pcp_comm_attention]
-    ablation: sender_budget
-    ablation_value: random_k3_seed0
-    overrides:
-      model_config.groups.adversary.params.comm_kwargs.sender_budget: 3
-      model_config.groups.adversary.params.comm_kwargs.sender_selection: random
-      model_config.groups.adversary.params.comm_kwargs.sender_selection_seed: 0
+- models:
+  - pcp_comm_gated
+  ablation: sender_budget
+  ablation_value: learned_k1
+- models:
+  - pcp_comm_gated
+  ablation: sender_budget
+  ablation_value: learned_k2
+- models:
+  - pcp_comm_gated
+  ablation: sender_budget
+  ablation_value: learned_k3
+- models:
+  - pcp_comm_gated
+  ablation: sender_budget
+  ablation_value: random_k1_seed0
+- models:
+  - pcp_comm_gated
+  ablation: sender_budget
+  ablation_value: random_k2_seed0
+- models:
+  - pcp_comm_gated
+  ablation: sender_budget
+  ablation_value: random_k3_seed0
+- models:
+  - pcp_comm_attention
+  ablation: sender_budget
+  ablation_value: learned_k1
+- models:
+  - pcp_comm_attention
+  ablation: sender_budget
+  ablation_value: learned_k2
+- models:
+  - pcp_comm_attention
+  ablation: sender_budget
+  ablation_value: learned_k3
+- models:
+  - pcp_comm_attention
+  ablation: sender_budget
+  ablation_value: random_k1_seed0
+- models:
+  - pcp_comm_attention
+  ablation: sender_budget
+  ablation_value: random_k2_seed0
+- models:
+  - pcp_comm_attention
+  ablation: sender_budget
+  ablation_value: random_k3_seed0

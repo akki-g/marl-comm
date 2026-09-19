@@ -1,7 +1,15 @@
 # Running the study on UCF ARCC Newton
 
-Four numbered scripts, submitted with `sbatch` in order. No helper shell scripts
-to execute — the only command you ever run is `sbatch`.
+PCP uses the evidence-gated workflow below. Its corrected protocol is still a
+candidate, so no PCP training stage is launch-ready. See
+[the PCP protocol guide](../docs/PCP_PROTOCOL.md) for review artifacts and exact
+scientific settings.
+
+## Historical Simple Spread workflow
+
+The following `00`–`04` scripts preserve the completed Simple Spread V2
+infrastructure workflow. They describe that study's seeds, settings, and runtime
+experience; they do not authorize a new PCP experiment.
 
 ```bash
 cd ~/marl-comm
@@ -24,20 +32,7 @@ sbatch --dependency=afterany:<main_jobid>:<ablation_jobid> slurm/04_analyze.sbat
 `slurm/newton_env.sh` is *sourced* by the job scripts, never executed, so it
 needs no execute permission.
 
-For Predator-Capture-Prey there is a second, parallel family of scripts. Read
-[Predator-Capture-Prey](#predator-capture-prey) before submitting any of them:
-the outcome metric is fixed as of 2026-09-03, but the budget and the evaluation
-signal are still open questions.
-
-```bash
-sbatch slurm/pcp_01_setup.sbatch             # manifests only; venv comes from 01
-sbatch slurm/pcp_02_pilot.sbatch             # 2 rows   — read before step 3
-sbatch slurm/pcp_03_main_comparison.sbatch   # 30 rows  — 6 models x 5 seeds
-sbatch slurm/pcp_04_ablations.sbatch         # 201 rows — seven ablations
-sbatch slurm/pcp_05_analyze.sbatch           # CSVs, plots, REPORT.md
-```
-
-## What each experiment is
+## Historical Simple Spread experiments
 
 **`02_main_comparison.sbatch` — 30 rows, the headline result.** Six models x
 five seeds at 600,000 frames on stock VMAS Simple Spread:
@@ -75,98 +70,109 @@ reproducibility check.
 
 ## Predator-Capture-Prey
 
-The PCP scripts are complete and tested, and the integration runs end to end.
-**The study is still not ready to launch.** Three problems were measured rather
-than suspected on 2026-09-02; the first is fixed, and the two that remain are
-design decisions rather than defects.
+**The corrected candidate is not launch-ready.** The old 60k/120k pilot and
+27-row gamma/entropy grid are retired calibration evidence. Array 795630
+completed all 27 rows at 600k and demonstrated learning at several gamma values;
+it does not confirm the repaired reset/RNG, observation, critic, and training
+health semantics. Preserve those historical artifacts under their original IDs.
 
-**1. The PCP outcome metric was identically zero — FIXED 2026-09-03.**
-`metrics.py` and `saliency.py` built an episode return by averaging the summed
-reward across *every* agent group. On Simple Spread there is one group, so that
-was that group's return. On PCP there are two, and `simple_tag`'s rewards are
-exactly zero-sum between them: each predator scores `+10` per capture and the
-prey `−10`, so the average was `0.0` by construction, whatever the predators
-did. Measured on two real 60,000-frame rows, every logged return was exactly
-`0.0`.
+The single source for new scientific settings is
+[`configs/protocols/pcp_corrected_v1.yaml`](../configs/protocols/pcp_corrected_v1.yaml).
+The candidate uses gamma 0.95, entropy 0.1, **ten** PPO minibatch passes, 600k
+frames, and 128 deterministic evaluation episodes per point. The budget is a
+fixed-compute choice, not a convergence claim. Full settings, semantic versions,
+runtime requirements, evidence requirements, and the reviewer workflow are in
+[the PCP protocol guide](../docs/PCP_PROTOCOL.md).
 
-The measured groups are now declared per task, as `return_groups` beside
-`params` in `configs/tasks/<task>.yaml` — `[agents]` for Simple Spread,
-`[adversary]` for PCP. Omitting the key keeps the old all-groups behaviour.
-`metrics.csv` additionally carries a per-group `return_mean` row, so an excluded
-group stays inspectable and a mis-declaration shows up in the data rather than
-only in the config; the analysis reads the ungrouped study row.
+### Plan first; submit only after the stage check passes
 
-Verified on both tasks, against BenchMARL's own per-group scalars:
+Use the existing virtualenv prepared by `01_setup.sbatch`, or select a compatible
+interpreter through `COMMSTUDY_PYTHON`. Planning constructs and checks the model
+and task contracts and writes inspectable manifests. It submits no training and
+grants no approval:
 
-| | commstudy study return | BenchMARL per-group | BenchMARL all-group (old behaviour) |
-|---|---|---|---|
-| PCP, `adversary` | `1.333, 0.667, 1.167, 1.5, 0.833` | identical | `0.0, 0.0, 0.0, 0.0, 0.0` |
-| Simple Spread, `agents` | `−552.313, −610.148` | identical | identical |
+```bash
+cd ~/marl-comm
+bash slurm/pcp_01_setup.sbatch
+```
 
-Simple Spread is therefore bit-identical to before, and PCP now reports the
-predators' return. `test_returns.py` pins both, including the equality with
-BenchMARL's own aggregate on the single-group task.
+| Script | Corrected workload | Manifest |
+|---|---|---|
+| `pcp_02b_protocol.sbatch` | 2 Identity confirmation rows, new seeds 10 and 11 | `runs/pcp_candidate_confirmation_corrected_v1/manifest.csv` |
+| `pcp_03_main_comparison.sbatch` | 30 rows: MLP reference plus five communication models, seeds 20–24 | `runs/pcp_comm_main_corrected_v1/manifest.csv` |
+| `pcp_04_ablations.sbatch` | 201 rows across seven ablations, seeds 20–22 | `runs/_manifests/pcp_ablations_corrected_v1.csv` |
 
-**2. Deterministic evaluation never catches the prey at this budget (open).**
-In the same rows, the adversary return under *stochastic collection* sits at
-1.0–1.7 — indistinguishable from the 1.5 a uniformly random policy scores — and
-under deterministic evaluation it is 0.0 at every point. Saliency inherits this:
-on a 12,000-frame `pcp_comm_broadcast` run both arms return 0.0, so the delta is
-0.0 even though the channel demonstrably changes behaviour (`action_shift 2.03`,
-`policy_kl 0.0118`). Note the lever is `experiment.evaluation_episodes`, not
-`scripts/saliency.py --episodes`: the evaluation environment is batched, so the
-episode count comes from the environment's batch size. `simple_tag`'s
-adversary reward is sparse by default (`shape_adversary_rew: false`, so reward
-arrives only on contact), and the protocol evaluates 5 episodes per point. The
-headline number is therefore a rare-event count measured with five samples,
-which the metric fix does not change. Levers, all study-design choices: enable
-`shape_adversary_rew`, raise `evaluation_episodes`, lengthen the budget, or
-report capture rate instead of return.
+Main and ablation YAML filenames remain familiar, but their suite IDs and run
+namespace are new. They derive their scientific settings from the versioned
+protocol. Existing manifests cannot silently authorize changed rows.
+`pcp_02_pilot.sbatch` and the old protocol-grid YAML are retired; do not use them
+to launch more calibration rows.
 
-**3. The training budget was never calibrated.** 60,000 frames is ten PPO
-update rounds and five evaluation points. It was chosen as a cheap first pass,
-and cost is not the constraint it was assumed to be: a 60,000-frame PCP row is
-about 70 seconds on one core and a 600,000-frame row about 12 minutes, so the
-entire 231-row study is roughly 4.5 core-hours at the current budget or 45 at
-Simple Spread's. Neither is a meaningful fraction of an 80,000 DPH allocation.
+A stage review must name its reviewer and rationale and bind the exact protocol
+hash, research-source fingerprint, stage, and hashed evidence files. Confirmation
+requires a candidate review. Main comparison additionally requires the protocol
+to be frozen with corrected confirmation evidence. Ablations require a reviewed
+main comparison, with extra evidence for guarded width/round factors. An
+approval-template command creates a **pending** review, not launch permission.
+Changes to bound sources, settings, or evidence invalidate the corresponding
+checks. The currently missing reviewed evidence must be supplied before launch.
 
-`gamma=0.9` also carries over from Simple Spread untested. It gives an
-effective horizon of about ten steps, which is a different proposition against
-a sparse capture reward than against a dense coverage cost.
+After the relevant review is complete, invoke the wrappers from a login node:
 
-None of what remains is a reason to change the code blind. It is a reason to
-decide the reward and evaluation design, and run the pilot before committing
-231 rows — which is what V1 on Simple Spread did not do, and why it
-is preserved in this repo as failure evidence rather than as results.
+```bash
+bash slurm/pcp_02b_protocol.sbatch       # confirmation, after candidate review
+bash slurm/pcp_03_main_comparison.sbatch # main, after corrected confirmation and freezing
+bash slurm/pcp_04_ablations.sbatch       # ablations, after main review
+```
 
-### What each PCP script is
+Each wrapper checks its manifest and stage **before calling `sbatch`**. The
+allocated worker checks the same binding again, plus package/device/thread
+requirements, before `srun` and training. Calling `sbatch` directly bypasses the
+login-node pre-submission check and can consume an allocation before rejection;
+it does not bypass the worker or managed-run checks. Environment setup success
+is not evidence that the candidate has been scientifically confirmed.
 
-**`pcp_01_setup.sbatch`** writes the three PCP manifests. It deliberately does
-*not* build the virtualenv; `01_setup.sbatch` owns that, and a second copy of
-that logic would drift. Run `01_setup.sbatch` first.
+### Measure the predators and preserve historical semantics
 
-**`pcp_02_pilot.sbatch` — 2 rows.** The no-communication control at 60,000 and
-120,000 frames, seed 0. `results/pcp_identity_pilot/REPORT.md` now reports the
-predators' return; compare it against the ~1.5 a random policy scores.
+PCP's measured group is explicitly `adversary`. Reward is repeated +10 per
+predator–prey contact step; it is not a count of distinct captures or a
+first-capture termination objective. The scripted prey still has an optimized
+policy whose actions the scenario discards. Its metrics remain separately
+inspectable, and its diagnostics must not be mixed into predator health.
 
-**`pcp_03_main_comparison.sbatch` — 30 rows.** `pcp_actor` plus the five
-`pcp_comm_*` models, seeds 0-4. Communication is on the `adversary` group only.
+Frozen-policy channel reliance compares matched complete episodes. Same-input
+influence evaluates both communication conditions on identical recorded inputs.
+Neither measurement alone establishes that communication-free control is
+impossible. `scripts/saliency.py --episodes 32` and
+`scripts/audit_runs.py --episodes 32` now measure exactly 32 episodes, regardless
+of the training/test environment batch size. This differs from the retired
+batched evaluator. Complete paired Identity episodes must remain an exact null.
 
-**`pcp_04_ablations.sbatch` — 201 rows, seeds 0-2.** The same seven ablations as
-Simple Spread, in one combined manifest at `runs/_manifests/pcp_ablations.csv`
-(distinct from the Simple Spread combined manifest, so the two studies cannot
-overwrite each other).
+```bash
+sbatch slurm/pcp_05_analyze.sbatch              # the 9 corrected suites
+sbatch slurm/pcp_05_analyze.sbatch --historical # retired suites, saved metrics only
+```
 
-**`pcp_05_analyze.sbatch`** covers all nine PCP suites and is safe to re-run
-mid-study.
+The default analysis covers corrected confirmation, main comparison, and all
+seven corrected ablation suites. It synchronizes run status, audits frozen
+predator policies, records reliance/influence measurements, and regenerates
+reports. It writes status/saliency artifacts beside runs as well as derived
+files under `results/`; it is not read-only.
 
-The prey group trains a policy that is discarded every step by
-`PredatorCapturePreyScenario.process_action`. Its loss and gradient rows in
-`metrics.csv` are expected waste, not a symptom.
+Historical mode skips checkpoint rollouts and new saliency measurements. Loading
+an old policy under current source/task semantics is not historical trajectory
+reproduction. Direct audit/saliency CLIs reject missing or incompatible runtime
+provenance by default. Any deliberate cross-runtime re-evaluation requires
+explicit analysis-device/mismatch options and records those differences; it must
+not replace the historical calibration claim or serve as corrected confirmation.
 
-## Read this before you submit
+## Historical Simple Spread runtime notes
 
-**A GPU will not make an individual row faster.** The actors are 19k-35k
+These notes record the Simple Spread infrastructure experience. For PCP, use
+the runtime declared in its protocol and the worker checks; changing devices,
+thread counts, packages, or batch sizes requires a reviewed protocol decision.
+
+**Small Simple Spread rows did not establish a GPU speedup.** The actors are 19k-35k
 parameters and the task runs 10 vectorised VMAS environments with three agents.
 That is far too small to saturate a V100 or H100; per-row time is dominated by
 Python and kernel-launch overhead, and a single row may well be *slower* on a

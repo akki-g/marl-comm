@@ -8,9 +8,13 @@ from benchmarl.environments.common import TaskClass
 from benchmarl.environments import VmasTask
 
 from commstudy.tasks.vmas import CustomVmasTask
+from commstudy.tasks.torchrl.power_grids import PowerGridTask
+from benchmarl.environments.vmas.simple_spread import TaskConfig as SpreadTaskConfig
+from commstudy.utils.validation import dataclass_values, number
 _TASK_REGISTRY = {
     "vmas_simple_spread": VmasTask.SIMPLE_SPREAD,
-    "vmas_predator_capture_prey": CustomVmasTask.PREDATOR_CAPTURE_PREY
+    "vmas_predator_capture_prey": CustomVmasTask.PREDATOR_CAPTURE_PREY,
+    "mapdn_voltage_control": PowerGridTask.VOLTAGE_CONTROL,
 }
 
 
@@ -48,6 +52,11 @@ def resolve_task(
 
     task_config = deepcopy(task.config)
     task_config.update(dict(params))
+
+    if name == "vmas_simple_spread":
+        dataclass_values(SpreadTaskConfig, task_config, "task_config.params")
+        for key in ("max_steps", "n_agents"):
+            number(task_config[key], f"task_config.params.{key}", minimum=1)
 
     return task_enum.get_task(
         config=task_config,

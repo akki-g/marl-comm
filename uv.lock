@@ -502,7 +502,6 @@ source = { editable = "." }
 dependencies = [
     { name = "benchmarl", extra = ["vmas"] },
     { name = "hydra-core" },
-    { name = "mapdn" },
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "tensordict" },
@@ -541,6 +540,9 @@ logging = [
     { name = "tensorboard" },
     { name = "wandb" },
 ]
+powergrid = [
+    { name = "mapdn" },
+]
 render = [
     { name = "av" },
     { name = "imageio" },
@@ -557,7 +559,7 @@ requires-dist = [
     { name = "hydra-core", specifier = ">=1.3" },
     { name = "imageio", marker = "extra == 'render'", specifier = ">=2.36" },
     { name = "imageio-ffmpeg", marker = "extra == 'render'", specifier = ">=0.5" },
-    { name = "mapdn", git = "https://github.com/akki-g/MAPDN.git" },
+    { name = "mapdn", marker = "extra == 'powergrid'", git = "https://github.com/akki-g/MAPDN.git" },
     { name = "matplotlib", marker = "extra == 'analysis'", specifier = ">=3.9" },
     { name = "moviepy", marker = "extra == 'render'", specifier = "<2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14" },
@@ -582,7 +584,7 @@ requires-dist = [
     { name = "wandb", marker = "extra == 'logging'", specifier = ">=0.19" },
     { name = "wheel", marker = "extra == 'dev'", specifier = ">=0.45" },
 ]
-provides-extras = ["dev", "logging", "analysis", "envs", "gnn", "render"]
+provides-extras = ["dev", "powergrid", "logging", "analysis", "envs", "gnn", "render"]
 
 [[package]]
 name = "contourpy"

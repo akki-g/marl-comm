@@ -1,0 +1,11 @@
+suite_id: pcp_candidate_confirmation_cpu_v2
+run_namespace: pcp_corrected_cpu_v2
+output_root: runs
+protocol: configs/protocols/pcp_corrected_cpu_v2.yaml
+stage: confirmation
+models:
+- pcp_comm_identity
+seeds:
+- 10
+- 11
+ablation: main

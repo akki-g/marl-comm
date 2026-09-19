@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import json
 import tempfile
 from pathlib import Path
 
+import torch
+
 from commstudy.analysis.diagnostics import load_frozen_experiment, rebuild_spec
 from commstudy.analysis.saliency import communication_saliency
-from commstudy.experiments.bookkeeping import atomic_write_json, utc_now
+from commstudy.experiments.bookkeeping import atomic_write_json, task_runtime_contract, utc_now
 from commstudy.experiments.returns import RETURN_GROUPS_KEY
 
 
@@ -25,8 +28,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", action="append", help="Restrict to run IDs containing this.")
     parser.add_argument("--out", type=Path, help="Write rows to this CSV.")
     parser.add_argument("--episodes", type=int, default=32)
-    parser.add_argument("--steps", type=int)
+    parser.add_argument("--steps", type=int, help="Maximum steps; incomplete episodes fail.")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--analysis-device", help="Explicitly override all analysis devices, e.g. cpu."
+    )
+    parser.add_argument(
+        "--allow-runtime-mismatch",
+        action="store_true",
+        help="Acknowledge and record analysis under changed/missing source or runtime provenance.",
+    )
     parser.add_argument(
         "--exploration",
         default="DETERMINISTIC",
@@ -64,6 +75,14 @@ def main(argv: list[str] | None = None) -> int:
                 run_dir,
                 config_root=config_root,
                 scratch_root=Path(scratch) / run_dir.name,
+                analysis_overrides=(
+                    dict.fromkeys(
+                        ("sampling_device", "train_device", "buffer_device"), args.analysis_device
+                    )
+                    if args.analysis_device
+                    else None
+                ),
+                allow_runtime_mismatch=args.allow_runtime_mismatch,
             )
             # Saliency is a difference of returns, so it has to measure exactly
             # the groups the run's task declares as the study's return.
@@ -77,10 +96,10 @@ def main(argv: list[str] | None = None) -> int:
                     seed=args.seed,
                     return_groups=spec.task_config.get(RETURN_GROUPS_KEY),
                 )
+                measured_contract = task_runtime_contract(experiment)
+                reconstruction = experiment.analysis_provenance
             finally:
-                close = getattr(experiment.test_env, "close", None)
-                if callable(close):
-                    close()
+                experiment.close()
 
             row = {
                 "run_id": metadata["run_id"],
@@ -94,13 +113,29 @@ def main(argv: list[str] | None = None) -> int:
                 **result.as_row(),
             }
             rows.append(row)
+            input_path = run_dir / f"saliency_inputs_{result.input_sha256[:16]}.pt"
+            temporary_input_path = input_path.with_suffix(".tmp")
+            torch.save(
+                {
+                    "schema_version": 2,
+                    "group": result.group,
+                    "input_distribution": result.input_distribution,
+                    "input_sha256": result.input_sha256,
+                    "seed": args.seed,
+                    "episode_ids": result.episode_ids,
+                    "inputs": [batch.cpu().to_dict() for batch in result.influence_inputs],
+                    "batch_sizes": [list(batch.batch_size) for batch in result.influence_inputs],
+                },
+                temporary_input_path,
+            )
+            temporary_input_path.replace(input_path)
             # Keep the measurement beside the run it describes so aggregation
             # picks it up automatically and never depends on a separate file
             # being passed around by hand.
             atomic_write_json(
                 run_dir / "saliency.json",
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "run_id": metadata["run_id"],
                     "measured_at": utc_now(),
                     "settings": {
@@ -108,11 +143,23 @@ def main(argv: list[str] | None = None) -> int:
                         "steps": args.steps,
                         "seed": args.seed,
                         "exploration": args.exploration,
+                        "measured_group": result.group,
+                        "influence_exploration": "DETERMINISTIC",
+                        "action_shift_reduction": "joint_group_action_l2_per_input",
+                        "input_distribution": result.input_distribution,
+                        "input_keys": result.input_keys,
+                        "input_dataset": input_path.name,
+                        "task_runtime_contract": measured_contract,
+                        "reconstruction": reconstruction,
                     },
+                    "episodes_with_comm": [
+                        dataclasses.asdict(item) for item in result.outcomes_with
+                    ],
+                    "episodes_without_comm": [
+                        dataclasses.asdict(item) for item in result.outcomes_without
+                    ],
                     "per_episode_returns_with_comm": list(result.per_episode_returns_with),
-                    "per_episode_returns_without_comm": list(
-                        result.per_episode_returns_without
-                    ),
+                    "per_episode_returns_without_comm": list(result.per_episode_returns_without),
                     **result.as_row(),
                 },
             )

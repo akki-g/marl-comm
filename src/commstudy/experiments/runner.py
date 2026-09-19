@@ -16,8 +16,10 @@ from benchmarl.models.common import ModelConfig
 
 from commstudy.algorithms import resolve_algorithm
 from commstudy.experiments.bookkeeping import RunContext, RunRecorder
-from commstudy.experiments.config import ExperimentSpec
+from commstudy.experiments.config import ExperimentSpec, validate_experiment_spec
+from commstudy.experiments.evaluation import EvaluationIsolatedExperiment
 from commstudy.experiments.metrics import ExperimentMetricsCallback
+from commstudy.experiments.health import TrainingHealthCallback
 from commstudy.experiments.returns import RETURN_GROUPS_KEY
 from commstudy.models import CommPolicyConfig
 from commstudy.tasks import resolve_task
@@ -51,19 +53,11 @@ def _build_benchmarl_mlp(
         None,
     )
 
-    values["layer_class"] = import_from_path(
-        layer_class_path
-    )
+    values["layer_class"] = import_from_path(layer_class_path)
 
-    values["activation_class"] = import_from_path(
-        activation_class_path
-    )
+    values["activation_class"] = import_from_path(activation_class_path)
 
-    values["norm_class"] = (
-        None
-        if norm_class_path is None
-        else import_from_path(norm_class_path)
-    )
+    values["norm_class"] = None if norm_class_path is None else import_from_path(norm_class_path)
 
     return MlpConfig(
         **values,
@@ -85,30 +79,11 @@ def build_model_config(
         communication
             -> CommPolicyConfig
     """
-    model_type = config.get(
-        "model_type"
-    )
+    from commstudy.experiments.schema import validated_model_config
 
-    params = config.get(
-        "params",
-        {},
-    )
-
-    if not isinstance(params, Mapping):
-        raise TypeError(
-            "Model 'params' must be a mapping."
-        )
-
-    if model_type == "benchmarl_mlp":
-        return _build_benchmarl_mlp(
-            params
-        )
-
-    if model_type == "communication":
-        return CommPolicyConfig(
-            **dict(params)
-        )
-    
+    # Validate before selecting a branch, and use the same explicit defaults
+    # exported into manifests. No module or random parameter is created here.
+    config = validated_model_config(config)
     if "groups" in config:
         return EnsembleModelConfig(
             {
@@ -118,10 +93,6 @@ def build_model_config(
         )
     return _build_single_model_config(config)
 
-    raise ValueError(
-        f"Unknown model_type '{model_type}'. "
-        "Expected 'benchmarl_mlp' or 'communication'."
-    )
 
 def _build_single_model_config(
     config: Mapping[str, Any],
@@ -139,9 +110,8 @@ def _build_single_model_config(
         return CommPolicyConfig(**dict(params))
 
     raise ValueError(
-        f"Unknown model_type '{model_type}'. "
-        "Expected 'benchmarl_mlp' or 'communication'."
-    )   
+        f"Unknown model_type '{model_type}'. Expected 'benchmarl_mlp' or 'communication'."
+    )
 
 
 def _build_experiment_config(
@@ -151,16 +121,11 @@ def _build_experiment_config(
     Start with BenchMARL's standard ExperimentConfig and apply only
     the experiment-level values specified by this project.
     """
-    config = (
-        BenchMARLExperimentConfig.get_from_yaml()
-    )
+    config = BenchMARLExperimentConfig.get_from_yaml()
 
     for key, value in overrides.items():
         if not hasattr(config, key):
-            raise ValueError(
-                "Unknown BenchMARL experiment configuration "
-                f"field '{key}'."
-            )
+            raise ValueError(f"Unknown BenchMARL experiment configuration field '{key}'.")
 
         setattr(
             config,
@@ -192,18 +157,15 @@ def build_experiment(
             ↓
         BenchMARL Experiment
     """
-    algorithm_params = (
-        spec.algorithm_config.get(
-            "params",
-            {},
-        )
+    validate_experiment_spec(spec)
+    algorithm_params = spec.algorithm_config.get(
+        "params",
+        {},
     )
 
-    task_params = (
-        spec.task_config.get(
-            "params",
-            {},
-        )
+    task_params = spec.task_config.get(
+        "params",
+        {},
     )
 
     algorithm_config = resolve_algorithm(
@@ -216,19 +178,11 @@ def build_experiment(
         task_params,
     )
 
-    model_config = build_model_config(
-        spec.model_config
-    )
+    model_config = build_model_config(spec.model_config)
 
-    critic_model_config = build_model_config(
-        spec.critic_model
-    )
+    critic_model_config = build_model_config(spec.critic_model)
 
-    experiment_config = (
-        _build_experiment_config(
-            spec.experiment
-        )
-    )
+    experiment_config = _build_experiment_config(spec.experiment)
 
     # BenchMARL creates only the generated run-name child and deliberately
     # uses ``parents=False``. Creating this parent here keeps every caller of
@@ -239,14 +193,21 @@ def build_experiment(
             exist_ok=True,
         )
 
-    return Experiment(
+    configured_callbacks = list(callbacks or ())
+    health_callbacks = [c for c in configured_callbacks if isinstance(c, TrainingHealthCallback)]
+    if len(health_callbacks) > 1:
+        raise ValueError("Only one TrainingHealthCallback may be installed.")
+    effective_callbacks = (health_callbacks or [TrainingHealthCallback()]) + [
+        c for c in configured_callbacks if not isinstance(c, TrainingHealthCallback)
+    ]
+    return EvaluationIsolatedExperiment(
         task=task,
         algorithm_config=algorithm_config,
         model_config=model_config,
         critic_model_config=critic_model_config,
         seed=spec.seed,
         config=experiment_config,
-        callbacks=list(callbacks or ()),
+        callbacks=effective_callbacks,
     )
 
 
@@ -277,8 +238,30 @@ def run_managed_experiment(
     repo_root: Path,
     overrides: Sequence[str] = (),
     callbacks: Sequence[Callback] = (),
+    protocol_binding: Mapping[str, Any] | None = None,
+    expected_contract: Mapping[str, Any] | None = None,
+    validation_run: bool = False,
 ) -> Experiment:
     """Execute one run with durable metadata, status, and tidy metrics."""
+    validate_experiment_spec(spec)
+    launch = None
+    if spec.task == "vmas_predator_capture_prey":
+        from commstudy.experiments.protocols import ProtocolGateError, validate_protocol_launch
+
+        if validation_run:
+            frame_limit = spec.experiment.get("max_n_frames")
+            if type(frame_limit) is not int or not 1 <= frame_limit <= 6000:
+                raise ProtocolGateError(
+                    "Validation runs require an explicit integer max_n_frames in [1, 6000]."
+                )
+        elif protocol_binding is None:
+            raise ProtocolGateError("Managed PCP training requires an approved protocol binding.")
+        elif expected_contract is None:
+            raise ProtocolGateError(
+                "Managed PCP scientific training requires a built model contract."
+            )
+        else:
+            launch = validate_protocol_launch(spec, protocol_binding, repo_root=repo_root)
     managed_spec = dataclasses.replace(
         spec,
         experiment={
@@ -294,6 +277,14 @@ def run_managed_experiment(
     )
     recorder.start()
 
+    if launch is not None or validation_run:
+        from commstudy.experiments.bookkeeping import atomic_write_json, read_json
+
+        metadata = read_json(context.metadata_path, {})
+        metadata["execution_purpose"] = "validation" if validation_run else "scientific"
+        metadata["protocol"] = launch
+        atomic_write_json(context.metadata_path, metadata)
+
     try:
         experiment = build_experiment(
             managed_spec,
@@ -307,6 +298,13 @@ def run_managed_experiment(
             ],
         )
         recorder.record_experiment(experiment)
+        if expected_contract is not None:
+            from commstudy.experiments.protocols import actual_model_contract, ProtocolGateError
+
+            if actual_model_contract(experiment) != expected_contract:
+                raise ProtocolGateError(
+                    "Built actor/critic/task contract differs from the manifest."
+                )
         experiment.run()
         recorder.complete(experiment)
         return experiment

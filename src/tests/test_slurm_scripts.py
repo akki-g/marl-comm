@@ -16,6 +16,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from commstudy.experiments.sweeps import create_combined_manifest, expand_suite_config
+from commstudy.experiments.protocols import load_protocol
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +48,7 @@ SCRIPTS = (
 )
 
 PCP_PILOT_SUITE = "pcp_identity_pilot.yaml"
-PCP_PROTOCOL_SUITE = "pcp_protocol_gate.yaml"
+PCP_PROTOCOL_SUITE = "pcp_candidate_confirmation.yaml"
 PCP_MAIN_SUITE = "pcp_comm_main.yaml"
 PCP_ABLATION_SUITES = (
     "pcp_comm_stage2_message_dim.yaml",
@@ -60,7 +61,6 @@ PCP_ABLATION_SUITES = (
 )
 
 PCP_TRAINING_SCRIPTS = (
-    "pcp_02_pilot.sbatch",
     "pcp_02b_protocol.sbatch",
     "pcp_03_main_comparison.sbatch",
     "pcp_04_ablations.sbatch",
@@ -302,11 +302,14 @@ def test_scripts_are_sourced_not_executed():
         assert "source slurm/newton_env.sh" in script
 
 
-def test_pcp_pilot_array_range_covers_every_planned_row(config_root, tmp_path):
-    plans = _plans(PCP_PILOT_SUITE, config_root, tmp_path)
+def test_historical_pcp_pilot_is_preserved_but_cannot_launch(config_root):
     script = (SLURM / "pcp_02_pilot.sbatch").read_text(encoding="utf-8")
 
-    assert _array_upper_bound(script) == len(plans) - 1
+    assert (config_root / "sweeps" / PCP_PILOT_SUITE).is_file()
+    assert "retired" in script
+    assert "exit 2" in script
+    assert "#SBATCH --array=" not in script
+    assert "srun" not in script
 
 
 def test_pcp_main_array_range_covers_every_planned_row(config_root, tmp_path):
@@ -328,8 +331,10 @@ def test_pcp_ablation_array_range_covers_every_planned_row(config_root, tmp_path
 def test_pcp_setup_builds_exactly_the_suites_the_arrays_consume():
     setup = (SLURM / "pcp_01_setup.sbatch").read_text(encoding="utf-8")
 
-    for name in (PCP_PILOT_SUITE, PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
+    for name in (PCP_PROTOCOL_SUITE, PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
         assert name in setup, f"pcp_01_setup.sbatch never builds a manifest for {name}"
+    assert PCP_PILOT_SUITE not in setup
+    assert "pcp_protocol_gate.yaml" not in setup
 
 
 def test_pcp_combined_manifest_matches_the_ablation_array(config_root, tmp_path):
@@ -355,122 +360,146 @@ def test_pcp_manifest_paths_agree_and_do_not_collide_with_simple_spread():
     ablations = (SLURM / "pcp_04_ablations.sbatch").read_text(encoding="utf-8")
     simple_spread = (SLURM / "03_ablations.sbatch").read_text(encoding="utf-8")
 
-    assert "runs/_manifests/pcp_ablations.csv" in setup
-    assert "runs/_manifests/pcp_ablations.csv" in ablations
-    assert "runs/_manifests/pcp_ablations.csv" not in simple_spread
+    path = "runs/_manifests/pcp_ablations_corrected_v1.csv"
+    assert path in setup
+    assert path in ablations
+    assert path not in simple_spread
 
 
 @pytest.mark.parametrize("name", PCP_TRAINING_SCRIPTS)
-def test_pcp_training_scripts_reclaim_stale_rows_and_pin_the_device(name):
+def test_pcp_training_scripts_reclaim_stale_rows_and_verify_protocol_runtime(name):
     script = (SLURM / name).read_text(encoding="utf-8")
 
     assert "--reclaim-stale" in script
+    assert "--runtime" in script
+    assert script.index("python scripts/protocol.py check") < script.index("srun python")
+    # The exact three devices come from the resolved protocol. Ad hoc worker
+    # overrides would break the audited execution and metadata agreement.
     for key in ("sampling_device", "train_device", "buffer_device"):
-        assert f"experiment.{key}=" in script
+        assert f"experiment.{key}=" not in script
 
 
 @pytest.mark.parametrize("name", PCP_TRAINING_SCRIPTS)
-def test_pcp_training_scripts_fail_loudly_without_a_manifest(name):
+def test_pcp_training_scripts_validate_the_manifest_before_submitting(name):
     script = (SLURM / name).read_text(encoding="utf-8")
 
-    assert "pcp_01_setup.sbatch" in script
-    assert "exit 1" in script
+    assert "set -euo pipefail" in script
+    check_position = script.index("scripts/protocol.py check --manifest")
+    assert check_position < script.index("exec sbatch")
+    assert 'MANIFEST="runs/' in script
 
 
 def test_pcp_scripts_reuse_the_shared_environment_and_do_not_rebuild_it():
     """The venv is built in one place. Two copies of that logic would drift."""
 
-    for name in (*PCP_TRAINING_SCRIPTS, "pcp_01_setup.sbatch", "pcp_05_analyze.sbatch"):
+    for name in (*PCP_TRAINING_SCRIPTS, "pcp_05_analyze.sbatch"):
         script = (SLURM / name).read_text(encoding="utf-8")
         assert "source slurm/newton_env.sh" in script
         assert "-m venv" not in script
         assert "pip install" not in script
+    setup = (SLURM / "pcp_01_setup.sbatch").read_text(encoding="utf-8")
+    assert '"$TASK_PYTHON" scripts/sweep.py' in setup
+    assert "-m venv" not in setup
+    assert "pip install" not in setup
 
 
-def test_pcp_analysis_covers_every_suite_the_arrays_produce():
+def test_pcp_analysis_covers_every_suite_the_arrays_produce(config_root):
     analyze = (SLURM / "pcp_05_analyze.sbatch").read_text(encoding="utf-8")
 
-    for name in (PCP_PILOT_SUITE, PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
-        assert name.removesuffix(".yaml") in analyze
+    for name in (PCP_PROTOCOL_SUITE, PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
+        suite = OmegaConf.load(config_root / "sweeps" / name)
+        assert suite.suite_id in analyze
 
 
-def test_pcp_launch_scripts_state_the_uncalibrated_budget():
-    """The horizon is a first pass, not a gate result. Saying so is the guard.
-
-    Nothing in the tooling stops someone submitting 231 rows at a budget no
-    diagnostic has justified, which is precisely how V1 was lost on Simple
-    Spread, so the scripts have to carry the warning themselves.
-    """
-
-    main = (SLURM / "pcp_03_main_comparison.sbatch").read_text(encoding="utf-8")
-    pilot = (SLURM / "pcp_02_pilot.sbatch").read_text(encoding="utf-8")
-
-    assert "60,000 frames" in main
-    assert "PILOT" in main
-    assert "gate" in pilot
+def test_pcp_budget_remains_a_candidate_until_corrected_confirmation_is_reviewed(config_root):
+    """The machine-readable protocol replaces historical warning-only guards."""
+    protocol = load_protocol(config_root / "protocols" / "pcp_corrected_v1.yaml")
+    assert protocol["status"] == "candidate"
+    assert protocol["base_spec"]["experiment"]["max_n_frames"] == 600_000
+    assert protocol["selection"]["budget_claim"] == "fixed_compute_600000_frames_not_convergence"
+    assert protocol["selection"]["confirmation_seeds"] == [10, 11]
 
 
 def test_protocol_gate_array_range_covers_every_planned_row(config_root, tmp_path):
     plans = _plans(PCP_PROTOCOL_SUITE, config_root, tmp_path)
     script = (SLURM / "pcp_02b_protocol.sbatch").read_text(encoding="utf-8")
 
-    assert len(plans) == 27
+    protocol = load_protocol(config_root / "protocols" / "pcp_corrected_v1.yaml")
+    assert {plan.model for plan in plans} == {"pcp_comm_identity"}
+    assert {plan.seed for plan in plans} == set(protocol["selection"]["confirmation_seeds"])
+    assert all(plan.protocol["stage"] == "confirmation" for plan in plans)
     assert _array_upper_bound(script) == len(plans) - 1
-    assert "runs/pcp_protocol_gate/manifest.csv" in script
+    assert "runs/pcp_candidate_confirmation_corrected_v1/manifest.csv" in script
 
 
 def test_setup_builds_the_protocol_gate_manifest():
     """The gate cannot run from a manifest nobody writes."""
     setup = (SLURM / "pcp_01_setup.sbatch").read_text(encoding="utf-8")
-    assert "configs/sweeps/pcp_protocol_gate.yaml" in setup
-    assert "pcp_02b_protocol.sbatch" in setup
+    assert "configs/sweeps/pcp_candidate_confirmation.yaml" in setup
+    assert "pcp_protocol_gate.yaml" not in setup
 
 
-def test_pcp_comparison_suites_carry_enough_evaluation_episodes(config_root):
-    """Five episodes put the standard error above the effect being measured.
-
-    Measured over 300 random episodes: mean 0.833, std 3.789, 94% of episodes
-    scoring exactly zero, so SEM at n=5 is 1.69 against effects of 1-3 return
-    points. The evaluation env is batched, so raising this widens the batch
-    instead of adding rollouts. See docs/RESULTS_pcp_pilot.md.
-    """
+def test_pcp_suites_inherit_the_common_evaluation_and_device_protocol(config_root):
+    """Each stage uses the same declared episode budget and numerical runtime."""
     suites = (PCP_MAIN_SUITE, PCP_PROTOCOL_SUITE, *PCP_ABLATION_SUITES)
     for name in suites:
         document = OmegaConf.to_container(
             OmegaConf.load(config_root / "sweeps" / name), resolve=True
         )
-        episodes = document["overrides"]["experiment.evaluation_episodes"]
+        protocol = load_protocol(config_root.parent / document["protocol"])
+        experiment = protocol["base_spec"]["experiment"]
+        episodes = experiment["evaluation_episodes"]
         assert episodes >= 128, f"{name} evaluates on only {episodes} episodes"
+        assert experiment["evaluation"] is True
+        assert experiment["evaluation_deterministic_actions"] is True
+        for key in ("sampling_device", "train_device", "buffer_device"):
+            assert experiment[key] == protocol["runtime"]["device"]
 
 
-def test_blocked_pcp_suites_say_so_where_someone_would_look(config_root):
-    """The placeholder budget/gamma/entropy must not read as settled.
-
-    V1 on Simple Spread is preserved in this repo as evidence of what launching
-    a full grid under an unvalidated protocol costs; these files are the last
-    thing between that and 231 PCP rows.
-    """
+def test_pcp_suites_bind_their_launch_stage_instead_of_using_warning_comments(config_root):
     for name in (PCP_MAIN_SUITE, *PCP_ABLATION_SUITES):
-        text = (config_root / "sweeps" / name).read_text(encoding="utf-8")
-        assert "BLOCKED" in text, name
-        assert "pcp_protocol_gate.yaml" in text, name
+        suite = OmegaConf.load(config_root / "sweeps" / name)
+        assert suite.protocol == "configs/protocols/pcp_corrected_v1.yaml"
+        assert suite.stage == ("comparison" if name == PCP_MAIN_SUITE else "ablation")
+        assert "overrides" not in suite
+        assert "max_n_frames" not in suite
 
 
-def test_analyze_step_covers_every_pcp_suite(config_root):
-    """A suite missing from the analyze list trains and then reports nothing.
-
-    Training writes per-run metrics.csv and summary.json only; REPORT.md comes
-    from scripts/report.py in pcp_05_analyze. `pcp_protocol_gate` was added as
-    a sweep and initially left out of that list, so its 27 rows would have run
-    and then been skipped with "no runs yet".
-    """
+def test_analyze_step_covers_every_cluster_pcp_suite(config_root):
+    """Newton owns CUDA/historical suites; CPU studies use their local analyzers."""
     analyze = (SLURM / "pcp_05_analyze.sbatch").read_text(encoding="utf-8")
-    suites = {
-        path.stem
-        for path in (config_root / "sweeps").glob("pcp_*.yaml")
-    }
+    suites = set()
+    for path in (config_root / "sweeps").glob("pcp_*.yaml"):
+        suite = OmegaConf.load(path)
+        if suite.get("protocol"):
+            protocol = load_protocol(config_root.parent / suite.protocol)
+            if protocol["runtime"]["device"] == "cpu":
+                # A Newton replay would violate the local study's saved
+                # Python/device/thread contract, including comparison rows.
+                assert suite.suite_id not in analyze
+                assert suite.stage in {"confirmation", "comparison"}
+                assert list(suite.seeds) == protocol["selection"][f"{suite.stage}_seeds"]
+                if suite.stage == "confirmation":
+                    assert list(suite.models) == ["pcp_comm_identity"]
+                else:
+                    declared = {
+                        (model, row.ablation, row.ablation_value)
+                        for model in suite.models
+                        for row in suite.runs
+                    }
+                    allowed = {
+                        (row["model"], row["ablation"], row["ablation_value"])
+                        for row in protocol["launch_scope"]["comparison"]
+                    }
+                    assert declared == allowed
+                    for script in ("evaluate_pcp_budget.py", "analyze_pcp_budget.py"):
+                        assert (REPO_ROOT / "scripts" / script).is_file()
+                continue
+        suites.add(suite.suite_id)
     missing = sorted(suite for suite in suites if suite not in analyze)
     assert not missing, f"pcp_05_analyze.sbatch never analyzes: {missing}"
+    assert "--historical" in analyze
+    assert "--no-policy" in analyze
 
 
 def test_req_txt_matches_what_the_cluster_installs():

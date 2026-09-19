@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import sys
 from pathlib import Path
@@ -14,7 +13,7 @@ from commstudy.experiments import (
     retry_context,
     run_managed_experiment,
 )
-from commstudy.experiments.bookkeeping import to_serializable
+from commstudy.experiments.config import resolved_experiment_dict, scientific_config_sha256
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -28,6 +27,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ablation-value")
     parser.add_argument("--retry", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--validation-run",
+        action="store_true",
+        help="Label a bounded (at most 6,000-frame) PCP implementation smoke run.",
+    )
     return parser
 
 
@@ -75,7 +79,8 @@ def main(argv: list[str] | None = None) -> int:
                     "run_dir": str(context.run_dir),
                     "run_id": context.run_id,
                     "suite_id": context.suite_id,
-                    "resolved_spec": to_serializable(dataclasses.asdict(spec)),
+                    "resolved_spec": resolved_experiment_dict(spec),
+                    "scientific_config_sha256": scientific_config_sha256(spec),
                 },
                 indent=2,
                 sort_keys=True,
@@ -89,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             context,
             repo_root=repo_root,
             overrides=overrides,
+            validation_run=args.validation_run,
         )
     except RunAlreadyCompletedError:
         print(f"Skipping completed run: {context.run_id}")

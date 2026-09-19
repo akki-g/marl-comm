@@ -23,7 +23,12 @@ from commstudy.experiments.bookkeeping import (
     make_run_id,
     retry_context,
 )
-from commstudy.experiments.config import load_experiment_spec
+from commstudy.experiments.config import (
+    load_experiment_spec,
+    experiment_spec_from_dict,
+    scientific_config_sha256,
+    resolved_experiment_dict,
+)
 from commstudy.experiments.runner import run_managed_experiment
 
 
@@ -48,6 +53,10 @@ MANIFEST_COLUMNS = (
     "output_root",
     "overrides_json",
     "command",
+    "resolved_spec_json",
+    "scientific_config_sha256",
+    "protocol_json",
+    "model_contract_json",
 )
 
 
@@ -68,6 +77,10 @@ class RunPlan:
     command: str
     attempt: int = 0
     retry_of: str | None = None
+    resolved_spec: dict[str, Any] | None = None
+    scientific_hash: str | None = None
+    protocol: dict[str, Any] | None = None
+    model_contract: dict[str, Any] | None = None
 
     def as_row(self) -> dict[str, Any]:
         return {
@@ -86,6 +99,10 @@ class RunPlan:
             "output_root": str(self.output_root),
             "overrides_json": json.dumps(list(self.overrides)),
             "command": self.command,
+            "resolved_spec_json": json.dumps(self.resolved_spec, sort_keys=True, allow_nan=False),
+            "scientific_config_sha256": self.scientific_hash or "",
+            "protocol_json": json.dumps(self.protocol, sort_keys=True, allow_nan=False),
+            "model_contract_json": json.dumps(self.model_contract, sort_keys=True, allow_nan=False),
         }
 
     @classmethod
@@ -106,7 +123,77 @@ class RunPlan:
             command=row.get("command", ""),
             attempt=int(row.get("attempt") or 0),
             retry_of=row.get("retry_of") or None,
+            resolved_spec=json.loads(row.get("resolved_spec_json") or "null"),
+            scientific_hash=row.get("scientific_config_sha256") or None,
+            protocol=json.loads(row.get("protocol_json") or "null"),
+            model_contract=json.loads(row.get("model_contract_json") or "null"),
         )
+
+
+_SUITE_KEYS = {
+    "suite_id",
+    "run_namespace",
+    "output_root",
+    "algorithm",
+    "task",
+    "models",
+    "model",
+    "seeds",
+    "ablation",
+    "ablation_value",
+    "max_n_frames",
+    "overrides",
+    "runs",
+    "protocol",
+    "stage",
+}
+_BLOCK_KEYS = _SUITE_KEYS - {
+    "suite_id",
+    "run_namespace",
+    "output_root",
+    "runs",
+    "protocol",
+    "stage",
+}
+_CONTRACT_CACHE: dict[str, dict] = {}
+
+
+def validate_suite_config(document: Mapping[str, Any]) -> None:
+    if not isinstance(document, Mapping):
+        raise TypeError("Suite must be a mapping.")
+    unknown = set(document) - _SUITE_KEYS
+    if unknown:
+        raise ValueError(f"Unknown suite fields: {sorted(unknown)}")
+    if not isinstance(document.get("suite_id"), str) or not document["suite_id"].strip():
+        raise ValueError("Suite requires a nonempty suite_id.")
+    if "runs" in document and (not isinstance(document["runs"], list) or not document["runs"]):
+        raise ValueError("Suite runs must be a nonempty list.")
+    for block in [document, *document.get("runs", [])]:
+        if not isinstance(block, Mapping):
+            raise TypeError("Each suite block must be a mapping.")
+        if block is not document and set(block) - _BLOCK_KEYS:
+            raise ValueError(f"Unknown run-block fields: {sorted(set(block) - _BLOCK_KEYS)}")
+        if "models" in block and "model" in block:
+            raise ValueError("Choose model or models, not both.")
+        for key in ("models", "seeds"):
+            if key in block and (not isinstance(block[key], list) or not block[key]):
+                raise ValueError(f"{key} must be a nonempty list.")
+        if "seeds" in block and any(type(seed) is not int or seed < 0 for seed in block["seeds"]):
+            raise ValueError("Suite seeds must be nonnegative integers.")
+        if "max_n_frames" in block and (
+            type(block["max_n_frames"]) is not int or block["max_n_frames"] <= 0
+        ):
+            raise ValueError("max_n_frames must be a positive integer.")
+        if "overrides" in block and not isinstance(block["overrides"], Mapping):
+            raise TypeError("Suite overrides must be a mapping.")
+    if "protocol" in document and document.get("stage") not in {
+        "confirmation",
+        "comparison",
+        "ablation",
+    }:
+        raise ValueError("Protocol suites require an explicit launch stage.")
+    if "stage" in document and "protocol" not in document:
+        raise ValueError("A launch stage requires a protocol.")
 
 
 def _plain_config(path: Path) -> dict[str, Any]:
@@ -139,6 +226,12 @@ def expand_suite_config(
     *,
     repo_root: Path,
 ) -> list[RunPlan]:
+    validate_suite_config(suite_config)
+    project_root = (
+        repo_root if (repo_root / "configs").is_dir() else Path(__file__).resolve().parents[3]
+    )
+    if suite_config.get("protocol"):
+        return _expand_protocol_suite(suite_config, repo_root=repo_root, project_root=project_root)
     suite_id = str(suite_config["suite_id"])
     run_namespace = suite_config.get("run_namespace")
     configured_root = Path(str(suite_config.get("output_root", "runs")))
@@ -206,6 +299,15 @@ def expand_suite_config(
                     command_parts.extend(["--ablation-value", str(ablation_value)])
                 command_parts.extend(overrides)
 
+                spec = load_experiment_spec(project_root / "configs", overrides)
+                if (
+                    spec.task,
+                    spec.algorithm,
+                    spec.model,
+                    spec.seed,
+                    spec.experiment["max_n_frames"],
+                ) != (task, algorithm, str(model), seed, max_n_frames):
+                    raise ValueError("Suite override conflicts with its row labels.")
                 plans.append(
                     RunPlan(
                         run_id=run_id,
@@ -215,17 +317,195 @@ def expand_suite_config(
                         model=str(model),
                         seed=int(seed),
                         ablation=ablation,
-                        ablation_value=(
-                            None if ablation_value is None else str(ablation_value)
-                        ),
+                        ablation_value=(None if ablation_value is None else str(ablation_value)),
                         max_n_frames=max_n_frames,
                         status=STATUS_PENDING,
                         output_root=output_root.resolve(),
                         overrides=tuple(overrides),
                         command=shlex.join(command_parts),
+                        resolved_spec=resolved_experiment_dict(spec),
+                        scientific_hash=scientific_config_sha256(spec),
                     )
                 )
     return plans
+
+
+def _expand_protocol_suite(suite, *, repo_root, project_root):
+    from commstudy.experiments.protocols import (
+        content_sha256,
+        expected_model_contract,
+        load_protocol,
+        protocol_spec,
+        validate_protocol_condition,
+        validate_built_contract,
+    )
+    from commstudy.experiments.provenance import source_fingerprint
+
+    forbidden = {"algorithm", "task", "max_n_frames", "overrides"} & set(suite)
+    if forbidden:
+        raise ValueError(
+            f"Protocol supplies these fields; remove duplicate suite fields: {forbidden}"
+        )
+    protocol_path = Path(suite["protocol"])
+    if not protocol_path.is_absolute():
+        protocol_path = project_root / protocol_path
+    protocol = load_protocol(protocol_path)
+    digest = content_sha256(protocol)
+    source_hash = source_fingerprint(project_root)
+    plans, seen_ids = [], set()
+    output_root = Path(suite.get("output_root", "runs"))
+    if not output_root.is_absolute():
+        output_root = repo_root / output_root
+    defaults = {key: value for key, value in suite.items() if key in _BLOCK_KEYS}
+    for raw in suite.get("runs", [{}]):
+        if {"algorithm", "task", "max_n_frames", "overrides"} & set(raw):
+            raise ValueError("Protocol run blocks declare factor names/values, not free overrides.")
+        block = _merged_block(defaults, raw)
+        for model in block.get("models", [block.get("model", "pcp_comm_identity")]):
+            for seed in block.get("seeds", [0]):
+                ablation, value = block.get("ablation", "main"), block.get("ablation_value")
+                value = None if value is None else str(value)
+                validate_protocol_condition(
+                    protocol, stage=suite["stage"], model=model, seed=seed,
+                    ablation=ablation, ablation_value=value,
+                )
+                spec = protocol_spec(
+                    protocol, model=model, seed=seed, ablation=ablation, ablation_value=value
+                )
+                run_id = make_run_id(
+                    task=spec.task,
+                    algorithm=spec.algorithm,
+                    model=model,
+                    seed=seed,
+                    namespace=suite.get("run_namespace", protocol["protocol_id"]),
+                    ablation=ablation,
+                    ablation_value=value,
+                )
+                if run_id in seen_ids:
+                    raise ValueError(f"Duplicate run_id generated by suite: {run_id}")
+                seen_ids.add(run_id)
+                # Override text remains explanatory/backwards-readable. Execution
+                # uses the saved specification and its protocol binding.
+                overrides = [
+                    f"algorithm={spec.algorithm}",
+                    f"task={spec.task}",
+                    f"model={model}",
+                    'critic_model="pcp_critic"',
+                    f"seed={seed}",
+                ]
+                for key in ("task_config", "model_config", "algorithm_config", "experiment"):
+                    overrides.append(_override(key, getattr(spec, key)))
+                for critic_key, critic_value in spec.critic_model.items():
+                    overrides.append(_override(f"critic_model.{critic_key}", critic_value))
+                shape_key = content_sha256(
+                    {
+                        "task": spec.task_config,
+                        "actor": spec.model_config,
+                        "critic": spec.critic_model,
+                        "algorithm": spec.algorithm_config,
+                        "source": source_hash,
+                    }
+                )
+                if shape_key not in _CONTRACT_CACHE:
+                    _CONTRACT_CACHE[shape_key] = expected_model_contract(spec)
+                validate_built_contract(protocol, _CONTRACT_CACHE[shape_key])
+                binding = {
+                    "path": str(protocol_path.relative_to(project_root)),
+                    "sha256": digest,
+                    "source_sha256": source_hash,
+                    "approval": (
+                        f"configs/protocols/approvals/{protocol['protocol_id']}_{suite['stage']}.json"
+                    ),
+                    "stage": suite["stage"],
+                    "model": model,
+                    "seed": seed,
+                    "ablation": ablation,
+                    "ablation_value": value,
+                }
+                manifest = output_root / suite["suite_id"] / "manifest.csv"
+                command = shlex.join(
+                    [
+                        "python",
+                        "scripts/sweep.py",
+                        "--manifest",
+                        str(manifest),
+                        "--run-id",
+                        run_id,
+                        "--run",
+                    ]
+                )
+                plans.append(
+                    RunPlan(
+                        run_id=run_id,
+                        suite_id=suite["suite_id"],
+                        task=spec.task,
+                        algorithm=spec.algorithm,
+                        model=model,
+                        seed=seed,
+                        ablation=ablation,
+                        ablation_value=value,
+                        max_n_frames=spec.experiment["max_n_frames"],
+                        status=STATUS_PENDING,
+                        output_root=output_root.resolve(),
+                        overrides=tuple(overrides),
+                        command=command,
+                        resolved_spec=resolved_experiment_dict(spec),
+                        scientific_hash=scientific_config_sha256(spec),
+                        protocol=binding,
+                        model_contract=_CONTRACT_CACHE[shape_key],
+                    )
+                )
+    return plans
+
+
+def validate_plan(plan, *, config_root, repo_root, extra_overrides=(), check_runtime=True):
+    from commstudy.experiments.protocols import ProtocolGateError, validate_protocol_launch
+
+    if plan.resolved_spec is None or not plan.scientific_hash:
+        raise ProtocolGateError(
+            "Legacy manifest has no resolved specification/hash; regenerate it."
+        )
+    spec = experiment_spec_from_dict(plan.resolved_spec)
+    if scientific_config_sha256(spec) != plan.scientific_hash:
+        raise ProtocolGateError("Manifest specification hash does not match its contents.")
+    if (spec.task, spec.algorithm, spec.model, spec.seed, spec.experiment["max_n_frames"]) != (
+        plan.task,
+        plan.algorithm,
+        plan.model,
+        plan.seed,
+        plan.max_n_frames,
+    ):
+        raise ProtocolGateError("Manifest labels conflict with its resolved specification.")
+    if plan.protocol is None:
+        if spec.task == "vmas_predator_capture_prey":
+            raise ProtocolGateError("PCP launch requires a versioned protocol and stage approval.")
+        current = load_experiment_spec(config_root, plan.overrides)
+        if scientific_config_sha256(current) != plan.scientific_hash:
+            raise ProtocolGateError("YAML defaults/overrides changed since manifest generation.")
+    else:
+        # Explanatory overrides must not drift independently of the authoritative snapshot.
+        current = load_experiment_spec(config_root, plan.overrides)
+        if scientific_config_sha256(current) != plan.scientific_hash:
+            raise ProtocolGateError("Manifest overrides do not reproduce its saved specification.")
+    raw = dataclasses.asdict(spec)
+    for override in extra_overrides:
+        key = override.split("=", 1)[0]
+        if key not in {
+            "experiment.train_device",
+            "experiment.sampling_device",
+            "experiment.buffer_device",
+        }:
+            raise ProtocolGateError(f"Not a permitted machine override: {key}")
+        config = OmegaConf.merge(OmegaConf.create(raw), OmegaConf.from_dotlist([override]))
+        raw = OmegaConf.to_container(config, resolve=True)
+    spec = experiment_spec_from_dict(raw)
+    if plan.protocol:
+        validate_protocol_launch(
+            spec, plan.protocol, repo_root=repo_root, check_runtime=check_runtime
+        )
+        if plan.model_contract is None:
+            raise ProtocolGateError("Protocol manifest is missing its built model contract.")
+    return spec
 
 
 def write_manifest(path: Path, plans: Sequence[RunPlan]) -> None:
@@ -280,9 +560,7 @@ def create_combined_manifest(
         _, suite_plans = create_manifest(Path(suite_path), repo_root=repo_root)
         for plan in suite_plans:
             if plan.run_id in seen:
-                raise ValueError(
-                    f"Duplicate run_id across combined suites: {plan.run_id}"
-                )
+                raise ValueError(f"Duplicate run_id across combined suites: {plan.run_id}")
             seen.add(plan.run_id)
         plans.extend(suite_plans)
 
@@ -398,6 +676,9 @@ def execute_plan(
     if existing is not None and not (retry_failed or stale):
         return dataclasses.replace(plan, status=existing), None
 
+    spec = validate_plan(
+        plan, config_root=config_root, repo_root=repo_root, extra_overrides=extra_overrides
+    )
     if extra_overrides:
         plan = dataclasses.replace(
             plan,
@@ -425,13 +706,14 @@ def execute_plan(
             status=STATUS_PENDING,
         )
 
-    spec = load_experiment_spec(config_root, plan.overrides)
     try:
         experiment = run_managed_experiment(
             spec,
             context,
             repo_root=repo_root,
             overrides=plan.overrides,
+            protocol_binding=plan.protocol,
+            expected_contract=plan.model_contract,
         )
     except Exception:
         return dataclasses.replace(plan, status=STATUS_FAILED), None

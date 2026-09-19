@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Literal
 import math
@@ -21,6 +23,65 @@ from tensordict.nn.probabilistic import InteractionType, interaction_type
 
 ChannelMode = Literal["always", "training", "evaluation", "disabled"]
 _CHANNEL_MODES = {"always", "training", "evaluation", "disabled"}
+_PHASE: ContextVar[str | None] = ContextVar("communication_phase", default=None)
+
+
+@contextmanager
+def channel_phase(phase: str):
+    """Declare lifecycle independently of stochastic/deterministic actions."""
+    if phase not in {"collection", "optimization", "evaluation"}:
+        raise ValueError(f"Unknown communication phase {phase!r}.")
+    token = _PHASE.set(phase)
+    try:
+        yield
+    finally:
+        _PHASE.reset(token)
+
+
+@contextmanager
+def preserve_channel_rng(channels: Sequence[CommChannel], seed: int | None = None):
+    """Keep an evaluation from advancing collection's private channel streams."""
+    targets = list({id(channel): channel for channel in channels}.values())
+    originals = [
+        (
+            channel._rng_seed,
+            {key: (generator, generator.get_state()) for key, generator in channel._rng.items()},
+            channel._last_sender_mask,
+        )
+        for channel in targets
+    ]
+    try:
+        if seed is not None:
+            for index, channel in enumerate(targets):
+                channel._rng_seed = int(seed) + index * 104729
+                channel._rng = {}
+        yield
+    finally:
+        for channel, (rng_seed, states, last_mask) in zip(targets, originals, strict=True):
+            channel._rng_seed = rng_seed
+            channel._last_sender_mask = last_mask
+            channel._rng = {key: generator for key, (generator, _) in states.items()}
+            for generator, state in states.values():
+                generator.set_state(state)
+
+
+@contextmanager
+def channel_intervention(channels: Sequence[CommChannel], sender_mask: torch.Tensor | bool):
+    """Intersect availability with a dominant mask, restoring it on every exit.
+
+    ``False`` severs all senders without consuming random numbers. This is an
+    evaluation intervention, separate from PPO's authoritative replay mask.
+    """
+    targets = list({id(channel): channel for channel in channels}.values())
+    originals = [(c._intervention_sender_mask, c._last_sender_mask) for c in targets]
+    try:
+        for channel in targets:
+            channel._intervention_sender_mask = sender_mask
+        yield
+    finally:
+        for channel, (mask, last_mask) in zip(targets, originals, strict=True):
+            channel._intervention_sender_mask = mask
+            channel._last_sender_mask = last_mask
 
 
 @dataclass(frozen=True)
@@ -41,9 +102,7 @@ def _validate_messages(messages: torch.Tensor) -> None:
     if messages.shape[-2] < 1 or messages.shape[-1] < 1:
         raise ValueError("Channel messages require at least one sender and one scalar.")
     if not messages.is_floating_point():
-        raise TypeError(
-            f"Channel messages must use a real floating dtype, got {messages.dtype}."
-        )
+        raise TypeError(f"Channel messages must use a real floating dtype, got {messages.dtype}.")
 
 
 def _resolve_sender_mask(
@@ -60,8 +119,7 @@ def _resolve_sender_mask(
         raise TypeError(f"sender_mask must be boolean, got {sender_mask.dtype}.")
     if sender_mask.dim() < 1 or sender_mask.shape[-1] != messages.shape[-2]:
         raise ValueError(
-            f"sender_mask must end in ({messages.shape[-2]},), "
-            f"got {tuple(sender_mask.shape)}."
+            f"sender_mask must end in ({messages.shape[-2]},), got {tuple(sender_mask.shape)}."
         )
     try:
         return torch.broadcast_to(
@@ -70,8 +128,7 @@ def _resolve_sender_mask(
         ).clone()
     except RuntimeError as exc:
         raise ValueError(
-            f"sender_mask shape {tuple(sender_mask.shape)} is not broadcastable "
-            f"to {target_shape}."
+            f"sender_mask shape {tuple(sender_mask.shape)} is not broadcastable to {target_shape}."
         ) from exc
 
 
@@ -87,6 +144,34 @@ class CommChannel(nn.Module, ABC):
             raise ValueError(f"Unknown channel mode '{mode}'. Expected one of: {expected}.")
         self.mode: ChannelMode = mode
         self._last_sender_mask: torch.Tensor | None = None
+        self._intervention_sender_mask: torch.Tensor | bool | None = None
+        # Independent of actor sampling and environment disturbances. Lazy
+        # initialization consumes no global draw and preserves Identity's RNG.
+        self._rng: dict[str, torch.Generator] = {}
+        self._rng_seed = torch.initial_seed()
+
+    def _generator(self, device: torch.device) -> torch.Generator:
+        key = str(device)
+        if key not in self._rng:
+            self._rng[key] = torch.Generator(device=device).manual_seed(
+                (self._rng_seed + 0x4348414E) % (2**63 - 1)
+            )
+        return self._rng[key]
+
+    def _fully_severed(
+        self,
+        messages: torch.Tensor,
+        sender_mask: torch.Tensor | None = None,
+    ) -> ChannelOutput | None:
+        mask = self._intervention_sender_mask
+        if mask is False or (
+            isinstance(mask, torch.Tensor) and not bool(_resolve_sender_mask(messages, mask).any())
+        ):
+            # Severing changes availability, not the public input contract.
+            _resolve_sender_mask(messages, sender_mask)
+            # Avoid irrelevant dropout/noise draws when no information passes.
+            return self._finish(messages, torch.zeros_like(messages[..., 0], dtype=torch.bool))
+        return None
 
     @property
     def last_sender_mask(self) -> torch.Tensor | None:
@@ -107,10 +192,14 @@ class CommChannel(nn.Module, ABC):
             InteractionType.MEDIAN,
         }
         benchmarl_evaluation = (
-            not torch.is_grad_enabled()
-            and interaction_type() in deterministic_interactions
+            not torch.is_grad_enabled() and interaction_type() in deterministic_interactions
         )
-        evaluation = not self.training or benchmarl_evaluation
+        phase = _PHASE.get()
+        evaluation = (
+            phase == "evaluation"
+            if phase is not None
+            else not self.training or benchmarl_evaluation
+        )
         return (
             self.mode == "always"
             or (self.mode == "training" and not evaluation)
@@ -131,7 +220,12 @@ class CommChannel(nn.Module, ABC):
         sender_mask: torch.Tensor,
     ) -> ChannelOutput:
         _validate_messages(messages)
-        masked_messages = messages * sender_mask.unsqueeze(-1).to(messages.dtype)
+        intervention = self._intervention_sender_mask
+        if isinstance(intervention, bool):
+            sender_mask = sender_mask & intervention
+        elif intervention is not None:
+            sender_mask = sender_mask & _resolve_sender_mask(messages, intervention)
+        masked_messages = torch.where(sender_mask.unsqueeze(-1), messages, 0.0)
         self._last_sender_mask = sender_mask.detach().clone()
         return ChannelOutput(messages=masked_messages, sender_mask=sender_mask)
 
@@ -180,15 +274,24 @@ class DropoutChannel(CommChannel):
         messages: torch.Tensor,
         sender_mask: torch.Tensor | None = None,
     ) -> ChannelOutput:
+        severed = self._fully_severed(messages, sender_mask)
+        if severed is not None:
+            return severed
         if sender_mask is not None:
             # An explicit replayed realization is authoritative: do not draw a
             # second stochastic failure mask.
             available = _resolve_sender_mask(messages, sender_mask)
+        elif self._should_apply() and self.p == 1.0:
+            available = torch.zeros_like(messages[..., 0], dtype=torch.bool)
         elif self._should_apply() and self.p > 0.0:
-            available = torch.rand(
-                messages.shape[:-1],
-                device=messages.device,
-            ) >= self.p
+            available = (
+                torch.rand(
+                    messages.shape[:-1],
+                    device=messages.device,
+                    generator=self._generator(messages.device),
+                )
+                >= self.p
+            )
         else:
             available = _resolve_sender_mask(messages, None)
 
@@ -213,9 +316,21 @@ class GaussianNoiseChannel(CommChannel):
         messages: torch.Tensor,
         sender_mask: torch.Tensor | None = None,
     ) -> ChannelOutput:
+        severed = self._fully_severed(messages, sender_mask)
+        if severed is not None:
+            return severed
         available = _resolve_sender_mask(messages, sender_mask)
         if self._should_apply() and self.std > 0.0:
-            messages = messages + torch.randn_like(messages) * self.std
+            messages = (
+                messages
+                + torch.randn(
+                    messages.shape,
+                    device=messages.device,
+                    dtype=messages.dtype,
+                    generator=self._generator(messages.device),
+                )
+                * self.std
+            )
         return self._finish(messages, available)
 
     def validate_policy_replay_safety(self) -> None:
@@ -255,10 +370,7 @@ class QuantizedChannel(CommChannel):
         if self._should_apply():
             clipped = messages.clamp(-self.clip_value, self.clip_value)
             step = 2.0 * self.clip_value / (self.levels - 1)
-            quantized = (
-                torch.round((clipped + self.clip_value) / step) * step
-                - self.clip_value
-            )
+            quantized = torch.round((clipped + self.clip_value) / step) * step - self.clip_value
             if self.straight_through:
                 messages = messages + (quantized - messages).detach()
             else:
@@ -274,6 +386,12 @@ class SequentialChannel(CommChannel):
         if not channels:
             raise ValueError("SequentialChannel requires at least one channel.")
         self.channels = nn.ModuleList(channels)
+        # Composed failures must draw independently; identical seeds would
+        # silently turn two p=.5 stages into one p=.5 stage, instead of p=.75.
+        for index, channel in enumerate(self.modules()):
+            if isinstance(channel, CommChannel):
+                channel._rng_seed = self._rng_seed + index * 104729
+                channel._rng = {}
         keep_probability = 1.0
         for channel in channels:
             keep_probability *= 1.0 - channel.requested_dropout_rate
@@ -284,6 +402,9 @@ class SequentialChannel(CommChannel):
         messages: torch.Tensor,
         sender_mask: torch.Tensor | None = None,
     ) -> ChannelOutput:
+        severed = self._fully_severed(messages, sender_mask)
+        if severed is not None:
+            return severed
         combined = _resolve_sender_mask(messages, sender_mask)
         transformed = messages
 
@@ -314,9 +435,7 @@ def build_channel(
     if isinstance(config, Sequence) and not isinstance(config, (str, bytes)):
         return SequentialChannel([build_channel(item) for item in config])
     if not isinstance(config, Mapping):
-        raise TypeError(
-            "Channel configuration must be a CommChannel, mapping, sequence, or None."
-        )
+        raise TypeError("Channel configuration must be a CommChannel, mapping, sequence, or None.")
 
     values = dict(config)
     channel_type = str(values.pop("type", "identity")).lower()

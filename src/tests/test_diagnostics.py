@@ -3,9 +3,12 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 from commstudy.analysis import audit_run, finiteness_report, metric_trace
 from commstudy.analysis.diagnostics import (
@@ -15,6 +18,14 @@ from commstudy.analysis.diagnostics import (
     rebuild_spec,
 )
 from commstudy.experiments.metrics import TidyMetricsWriter
+from commstudy.experiments.config import (
+    experiment_spec_from_dict,
+    load_experiment_spec,
+    resolved_experiment_dict,
+    scientific_config_sha256,
+)
+from commstudy.experiments.bookkeeping import capture_versions, task_runtime_contract
+from commstudy.experiments.provenance import source_fingerprint
 
 
 BASE_OVERRIDES = [
@@ -37,19 +48,39 @@ def _write_run(
     inject_nonfinite=False,
     status="completed",
     overrides=BASE_OVERRIDES,
+    spec=None,
+    experiment=None,
+    training_group="agents",
 ):
     run_dir.mkdir(parents=True, exist_ok=True)
+    repo_root = Path(__file__).resolve().parents[2]
+    if spec is None:
+        spec = load_experiment_spec(repo_root / "configs", list(overrides))
+    (run_dir / "resolved_config.yaml").write_text(
+        OmegaConf.to_yaml(OmegaConf.create({"commstudy": resolved_experiment_dict(spec)})),
+        encoding="utf-8",
+    )
     (run_dir / "metadata.json").write_text(
         json.dumps(
             {
                 "run_id": run_dir.name,
                 "suite_id": run_dir.parent.name,
                 "status": status,
-                "task": "vmas_simple_spread",
-                "algorithm": "mappo",
-                "model": "comm_identity",
-                "seed": 0,
+                "task": spec.task,
+                "algorithm": spec.algorithm,
+                "model": spec.model,
+                "seed": spec.seed,
                 "overrides": list(overrides),
+                "versions": capture_versions(),
+                "source_sha256": source_fingerprint(repo_root),
+                "scientific_config_sha256": scientific_config_sha256(spec),
+                "runtime": {
+                    key: spec.experiment.get(key)
+                    for key in ("sampling_device", "train_device", "buffer_device")
+                },
+                "task_runtime_contract": task_runtime_contract(
+                    experiment or SimpleNamespace(task=None)
+                ),
             }
         ),
         encoding="utf-8",
@@ -77,7 +108,7 @@ def _write_run(
             frames=frames,
             iteration=index,
             phase="training",
-            group="agents",
+            group=training_group,
             metrics={"entropy": entropy, "loss_critic": 100.0 - index},
         )
     if inject_nonfinite:
@@ -85,7 +116,7 @@ def _write_run(
             frames=24_000,
             iteration=3,
             phase="training",
-            group="agents",
+            group=training_group,
             metrics={"entropy": float("nan"), "loss_critic": float("inf")},
         )
     return run_dir
@@ -200,21 +231,236 @@ def test_named_leaves_skips_next_and_non_float_entries():
         batch_size=[2],
     )
 
-    found = _named_leaves(batch, "action")
+    found = _named_leaves(batch, "action", "agents")
 
     assert len(found) == 1
     assert torch.equal(found[0], torch.zeros(6, dtype=torch.float64))
 
 
-def test_rebuild_spec_reproduces_the_recorded_overrides(tmp_path, config_root):
+def test_rebuild_spec_reproduces_snapshot_without_current_defaults(tmp_path, config_root):
     run_dir = _write_run(tmp_path / "suite" / "spec")
 
-    spec = rebuild_spec(run_dir, config_root)
+    metadata = json.loads((run_dir / "metadata.json").read_text())
+    metadata["overrides"] = ["algorithm_config.params.entropy_coef=999", "experiment.gamma=0.5"]
+    (run_dir / "metadata.json").write_text(json.dumps(metadata))
+    spec = rebuild_spec(run_dir, tmp_path / "nonexistent-current-configs")
 
     assert spec.model == "comm_identity"
     assert spec.experiment["gamma"] == 0.9
     assert spec.experiment["on_policy_n_minibatch_iters"] == 5
     assert spec.algorithm_config["params"]["entropy_coef"] == 0.1
+
+
+def test_rebuild_spec_rejects_missing_snapshot_instead_of_replaying_old_overrides(tmp_path):
+    run = _write_run(tmp_path / "run")
+    (run / "resolved_config.yaml").unlink()
+    with pytest.raises(FileNotFoundError, match="resolved specification"):
+        rebuild_spec(run)
+
+
+def test_audit_infers_saved_pcp_group_and_never_mixes_prey_training_metrics(tmp_path, config_root):
+    spec = load_experiment_spec(
+        config_root,
+        ["task=vmas_predator_capture_prey", "model=pcp_comm_identity", "critic_model=pcp_critic"],
+    )
+    run = _write_run(tmp_path / "pcp", spec=spec, training_group="adversary")
+    writer = TidyMetricsWriter(run)
+    writer.write(
+        frames=24_000,
+        iteration=4,
+        phase="training",
+        group="agent",
+        metrics={"entropy": -999.0, "loss_critic": float("nan")},
+    )
+    report = audit_run(run)
+    assert report["measured_group"] == "adversary"
+    assert report["entropy_last"] == 0.5
+    assert report["entropy_min"] == 0.5
+    assert report["all_finite"] is True
+    assert report["all_groups_finiteness"]["all_finite"] is False
+    with pytest.raises(ValueError, match="multiple groups"):
+        metric_trace(run, "training", "entropy")
+
+
+def test_audit_rejects_ambiguous_groups_without_saved_selection(tmp_path):
+    run = _write_run(tmp_path / "ambiguous")
+    snapshot = run / "resolved_config.yaml"
+    document = OmegaConf.load(snapshot)
+    document.commstudy.task_config.pop("return_groups", None)
+    OmegaConf.save(document, snapshot)
+    metadata_path = run / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["scientific_config_sha256"] = scientific_config_sha256(
+        experiment_spec_from_dict(OmegaConf.to_container(document.commstudy, resolve=True))
+    )
+    metadata_path.write_text(json.dumps(metadata))
+    TidyMetricsWriter(run).write(
+        frames=24_000,
+        iteration=4,
+        phase="training",
+        group="second",
+        metrics={"entropy": -99},
+    )
+    with pytest.raises(ValueError, match="explicit measured group"):
+        audit_run(run)
+
+
+def test_real_pcp_action_audit_counts_32_episodes_and_excludes_poisoned_prey(config_root, tmp_path):
+    from commstudy.experiments.runner import build_experiment
+
+    spec = load_experiment_spec(
+        config_root,
+        [
+            "task=vmas_predator_capture_prey",
+            "model=pcp_comm_identity",
+            "critic_model=pcp_critic",
+            "experiment.evaluation_episodes=5",
+            "experiment.evaluation=false",
+            "experiment.loggers=[]",
+            "experiment.create_json=false",
+            "experiment.checkpoint_at_end=false",
+            "task_config.params.max_steps=5",
+        ],
+    )
+    spec = dataclasses.replace(spec, experiment={**spec.experiment, "save_folder": str(tmp_path)})
+    experiment = build_experiment(spec)
+
+    class PoisonPrey(torch.nn.Module):
+        def __init__(self, policy):
+            super().__init__()
+            self.policy = policy
+
+        def forward(self, td):
+            result = self.policy(td)
+            for name, value in (("loc", math.nan), ("scale", math.inf), ("action", 1.0)):
+                result.set(("agent", name), torch.full_like(result["agent", name], value))
+            return result
+
+    try:
+        assert experiment.test_env.batch_size == torch.Size([5])
+        with pytest.raises(ValueError, match="explicit group"):
+            policy_action_diagnostics(experiment, episodes=32, steps=2)
+        experiment.policy = PoisonPrey(experiment.policy)
+        result = policy_action_diagnostics(experiment, group="adversary", episodes=32, steps=2)
+        assert result.episodes == 32
+        assert len(set(result.episode_ids)) == 32
+        assert result.episode_transitions == (2,) * 32
+        assert result.action_scalars == 32 * 2 * 3 * 2
+        assert result.finite_action_fraction == result.finite_location_fraction == 1.0
+        assert result.finite_scale_fraction == 1.0
+        assert result.max_abs_action < 0.999
+        assert result.complete_episodes == 0
+    finally:
+        experiment.close()
+
+
+@pytest.fixture
+def frozen_run(tmp_path, config_root):
+    from commstudy.experiments.runner import build_experiment
+
+    spec = load_experiment_spec(config_root, [*BASE_OVERRIDES, "experiment.evaluation=false"])
+    source = build_experiment(
+        dataclasses.replace(
+            spec, experiment={**spec.experiment, "save_folder": str(tmp_path / "source")}
+        )
+    )
+    try:
+        run = _write_run(tmp_path / "run", spec=spec, experiment=source)
+        (run / "checkpoints").mkdir()
+        torch.save(
+            {
+                "group_policies": {
+                    group: policy.state_dict() for group, policy in source.group_policies.items()
+                }
+            },
+            run / "checkpoints" / "policy_state.pt",
+        )
+    finally:
+        source.close()
+    return run
+
+
+@pytest.mark.parametrize("mutation", ["missing", "extra"])
+def test_checkpoint_requires_exact_policy_group_set(frozen_run, tmp_path, mutation):
+    checkpoint_path = frozen_run / "checkpoints" / "policy_state.pt"
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
+    if mutation == "missing":
+        checkpoint["group_policies"].pop("agents")
+    else:
+        checkpoint["group_policies"]["unexpected"] = {}
+    torch.save(checkpoint, checkpoint_path)
+    with pytest.raises(ValueError, match="group set"):
+        load_frozen_experiment(frozen_run, scratch_root=tmp_path / "audit")
+
+
+def test_checkpoint_runtime_mismatch_requires_explicit_recorded_acknowledgement(
+    frozen_run, tmp_path
+):
+    metadata_path = frozen_run / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["source_sha256"] = "historical-source"
+    metadata["versions"]["vmas"] = "historical-version"
+    metadata_path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="source/runtime"):
+        load_frozen_experiment(frozen_run, scratch_root=tmp_path / "audit")
+    before = {
+        path.relative_to(frozen_run): path.read_bytes()
+        for path in frozen_run.rglob("*")
+        if path.is_file()
+    }
+    experiment = load_frozen_experiment(
+        frozen_run,
+        scratch_root=tmp_path / "audit",
+        allow_runtime_mismatch=True,
+        analysis_overrides={
+            "sampling_device": "cpu",
+            "train_device": "cpu",
+            "buffer_device": "cpu",
+        },
+    )
+    try:
+        assert experiment.analysis_provenance["allow_runtime_mismatch"] is True
+        assert set(experiment.analysis_provenance["compatibility_mismatches"]) == {
+            "source_sha256",
+            "versions.vmas",
+        }
+        assert experiment.analysis_provenance["analysis_overrides"]["sampling_device"] == "cpu"
+    finally:
+        experiment.close()
+    assert before == {
+        path.relative_to(frozen_run): path.read_bytes()
+        for path in frozen_run.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_checkpoint_rejects_changed_semantic_contract(frozen_run, tmp_path):
+    path = frozen_run / "metadata.json"
+    metadata = json.loads(path.read_text())
+    metadata["task_runtime_contract"]["evaluation_randomness_protocol"] = "legacy"
+    path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="task runtime contract"):
+        load_frozen_experiment(frozen_run, scratch_root=tmp_path / "audit")
+
+
+def test_checkpoint_rejects_changed_scientific_snapshot(frozen_run, tmp_path):
+    path = frozen_run / "resolved_config.yaml"
+    document = OmegaConf.load(path)
+    document.commstudy.experiment.gamma = 0.91
+    OmegaConf.save(document, path)
+    with pytest.raises(ValueError, match="scientific configuration hash"):
+        load_frozen_experiment(frozen_run, scratch_root=tmp_path / "audit")
+
+
+def test_checkpoint_rejects_scratch_inside_run_and_scientific_analysis_overrides(
+    frozen_run, tmp_path
+):
+    with pytest.raises(ValueError, match="outside the audited run"):
+        load_frozen_experiment(frozen_run, scratch_root=frozen_run / "audit")
+    with pytest.raises(ValueError, match="Unsupported analysis-only"):
+        load_frozen_experiment(
+            frozen_run, scratch_root=tmp_path / "audit", analysis_overrides={"gamma": 0.99}
+        )
 
 
 @pytest.mark.parametrize("exploration", ["DETERMINISTIC", "RANDOM"])
@@ -231,18 +477,17 @@ def test_policy_action_diagnostics_on_a_real_frozen_actor(tmp_path, config_root,
             experiment={**spec.experiment, "save_folder": str(tmp_path / "source")},
         )
     )
-    run_dir = _write_run(tmp_path / "suite" / "real")
+    run_dir = _write_run(tmp_path / "suite" / "real", spec=spec, experiment=source)
     (run_dir / "checkpoints").mkdir()
     torch.save(
         {
             "group_policies": {
-                group: policy.state_dict()
-                for group, policy in source.group_policies.items()
+                group: policy.state_dict() for group, policy in source.group_policies.items()
             }
         },
         run_dir / "checkpoints" / "policy_state.pt",
     )
-    source.test_env.close()
+    source.close()
 
     experiment = load_frozen_experiment(
         run_dir,
@@ -257,7 +502,7 @@ def test_policy_action_diagnostics_on_a_real_frozen_actor(tmp_path, config_root,
             seed=0,
         )
     finally:
-        experiment.test_env.close()
+        experiment.close()
 
     assert diagnostics.exploration == exploration
     assert diagnostics.action_scalars > 0
@@ -269,3 +514,9 @@ def test_policy_action_diagnostics_on_a_real_frozen_actor(tmp_path, config_root,
     assert diagnostics.mean_scale is not None
     assert diagnostics.mean_scale > 0.0
     assert diagnostics.mean_abs_location is not None
+    assert diagnostics.group == "agents"
+    assert diagnostics.episodes == 5
+    assert diagnostics.action_scalars == 5 * 5 * 3 * 2
+    assert len(diagnostics.episode_ids) == 5
+    assert diagnostics.complete_episodes == 0
+    assert diagnostics.scale_quantiles["p05"] <= diagnostics.scale_quantiles["p95"]

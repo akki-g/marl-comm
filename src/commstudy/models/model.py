@@ -34,6 +34,7 @@ class CommPolicyModel(Model):
         comm_class_path: str,
         comm_kwargs: dict | None = None,
         comm_context_keys: dict | None = None,
+        actor_observation_keys: list[str | list[str] | tuple[str, ...]] | None = None,
         use_role_embedding: bool = False,
         num_roles: int = 2,
         **kwargs,
@@ -41,6 +42,28 @@ class CommPolicyModel(Model):
         agent_group = kwargs.get("agent_group")
         if not isinstance(agent_group, str):
             raise TypeError("CommPolicyModel requires a string agent_group.")
+
+        declared_keys = (
+            ["observation"] if actor_observation_keys is None else actor_observation_keys
+        )
+        if not isinstance(declared_keys, (list, tuple)) or not declared_keys:
+            raise ValueError("actor_observation_keys must be a non-empty key list.")
+        self.actor_observation_keys = [
+            self._normalize_context_key(agent_group, key) for key in declared_keys
+        ]
+        if len(set(self.actor_observation_keys)) != len(self.actor_observation_keys):
+            raise ValueError("actor_observation_keys must not contain duplicate keys.")
+        for key in self.actor_observation_keys:
+            if not isinstance(key, tuple) or len(key) < 2 or key[0] != agent_group:
+                raise ValueError(
+                    "Actor observation keys must belong to the model's agent group; "
+                    f"got {key!r} for {agent_group!r}."
+                )
+            if any(
+                part in {"state", "global_state", "info", "reward", "episode_reward"}
+                for part in key[1:]
+            ):
+                raise ValueError(f"Privileged or diagnostic actor input is forbidden: {key!r}.")
 
         self.comm_context_keys = {
             str(context_name): self._normalize_context_key(
@@ -51,6 +74,8 @@ class CommPolicyModel(Model):
         }
         if len(set(self.comm_context_keys.values())) != len(self.comm_context_keys):
             raise ValueError("Each communication context field must map to a unique key.")
+        if set(self.actor_observation_keys) & set(self.comm_context_keys.values()):
+            raise ValueError("Actor observation keys and communication context must be disjoint.")
 
         super().__init__(**kwargs)
 
@@ -150,8 +175,7 @@ class CommPolicyModel(Model):
         return normalized[0] if len(normalized) == 1 else normalized
 
     def _get_encoder_in_keys(self) -> list[str | tuple[str, ...]]:
-        context_keys = set(self.comm_context_keys.values())
-        return [key for key in self.in_keys if key not in context_keys]
+        return list(self.actor_observation_keys)
 
     def _perform_checks(self) -> None:
         """
@@ -192,8 +216,17 @@ class CommPolicyModel(Model):
         misaligned data instead of failing.
         """
         encoder_in_keys = self._get_encoder_in_keys()
-        if not encoder_in_keys:
-            raise ValueError("CommPolicyModel requires at least one local encoder input.")
+        input_spec_keys = set(self.in_keys)
+        missing = set(encoder_in_keys) - input_spec_keys
+        unexpected = input_spec_keys - set(encoder_in_keys) - set(self.comm_context_keys.values())
+        if missing or unexpected:
+            raise ValueError(
+                "Actor input spec violates actor_observation_keys: "
+                f"missing={sorted(missing, key=str)!r}, "
+                f"unexpected={sorted(unexpected, key=str)!r}. "
+                "Declare local inputs explicitly and keep privileged/diagnostic leaves "
+                "outside the actor observation spec."
+            )
 
         for key in encoder_in_keys:
             spec = self.input_spec[key]
@@ -204,7 +237,6 @@ class CommPolicyModel(Model):
                     f"{self.n_agents}, got {tuple(spec.shape)}."
                 )
 
-        input_spec_keys = set(self.in_keys)
         for context_name, key in self.comm_context_keys.items():
             if key not in input_spec_keys:
                 # Context is optional and may be injected as an extra TensorDict

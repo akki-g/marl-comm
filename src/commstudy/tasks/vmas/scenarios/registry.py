@@ -17,17 +17,16 @@ No other file in commstudy/tasks/vmas/ needs to change.
 
 
 from __future__ import annotations
-from typing import Type
 
 from vmas.simulator.scenario import BaseScenario
 
 from commstudy.tasks.vmas.scenarios.predator_capture_prey import PredatorCapturePreyScenario
 
-_SCENARIO_REGISTRY: dict[str, Type[BaseScenario]] = {
+_SCENARIO_REGISTRY: dict[str, type[BaseScenario]] = {
     "predator_capture_prey": PredatorCapturePreyScenario,
 }
 
-def get_scenario_class(task_name: str) -> Type[BaseScenario]:
+def get_scenario_class(task_name: str) -> type[BaseScenario]:
     try:
         return _SCENARIO_REGISTRY[task_name]
     except KeyError as exc:

@@ -36,6 +36,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--steps", type=int)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--group", help="Measured policy group; defaults to saved task return_groups."
+    )
+    parser.add_argument(
+        "--analysis-device", help="Explicitly override all analysis devices, e.g. cpu."
+    )
+    parser.add_argument(
+        "--allow-runtime-mismatch",
+        action="store_true",
+        help="Acknowledge and record analysis under changed/missing source or runtime provenance.",
+    )
     parser.add_argument("--saturation-threshold", type=float, default=0.999)
     return parser
 
@@ -46,17 +57,13 @@ def main(argv: list[str] | None = None) -> int:
     suite_dir = args.suite_dir.resolve()
 
     run_dirs = sorted(
-        path
-        for path in suite_dir.iterdir()
-        if path.is_dir() and (path / "metadata.json").exists()
+        path for path in suite_dir.iterdir() if path.is_dir() and (path / "metadata.json").exists()
     )
     if args.run_id:
         wanted = set(args.run_id)
         run_dirs = [path for path in run_dirs if path.name in wanted]
     if args.model:
-        run_dirs = [
-            path for path in run_dirs if any(token in path.name for token in args.model)
-        ]
+        run_dirs = [path for path in run_dirs if any(token in path.name for token in args.model)]
     if not run_dirs:
         raise SystemExit(f"No matching runs under {suite_dir}")
 
@@ -71,6 +78,15 @@ def main(argv: list[str] | None = None) -> int:
                 steps=args.steps,
                 seed=args.seed,
                 saturation_threshold=args.saturation_threshold,
+                group=args.group,
+                analysis_overrides=(
+                    dict.fromkeys(
+                        ("sampling_device", "train_device", "buffer_device"), args.analysis_device
+                    )
+                    if args.analysis_device
+                    else None
+                ),
+                allow_runtime_mismatch=args.allow_runtime_mismatch,
             )
             reports.append(report)
             print(json.dumps(report, indent=2, sort_keys=True, default=str))

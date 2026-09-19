@@ -1,0 +1,24 @@
+data_path: data/case33_3min_final
+manifest_path: data/mapdn_case33_manifest.json
+normalization_path: null
+max_steps: 239
+history: 1
+split: train
+evaluation_split: validation
+measurement_noise: true
+reset_action: false
+mode: distributed
+voltage_barrier_type: l1
+voltage_weight: 1.0
+q_weight: 0.1
+line_weight: null
+pv_scale: 1.0
+demand_scale: 1.0
+v_lower: 0.95
+v_upper: 1.05
+action_scale: 0.8
+action_bias: 0.0
+state_space: [pv, demand, reactive, vm_pu, va_degree]
+solver_algorithm: nr
+solver_max_iteration: 20
+solver_tolerance_mva: 1.0e-8

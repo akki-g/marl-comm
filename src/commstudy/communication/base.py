@@ -43,7 +43,8 @@ class CommModule(nn.Module, ABC):
     Subclasses record only detached scalar summaries through
     :meth:`_record_stats`; retaining full message or attention tensors here
     would unnecessarily keep training data alive. Recorded values are averaged
-    over forward calls since :meth:`reset_stats`, except ``max_message_norm``,
+    over transition weights when lifecycle instrumentation is installed (otherwise
+    forward calls) since :meth:`reset_stats`, except ``max_message_norm``,
     which is reduced as a true window maximum.
     """
 
@@ -222,6 +223,7 @@ class CommModule(nn.Module, ABC):
     ) -> None:
         """Accumulate detached scalar summaries for later logging."""
 
+        weight = getattr(self, "_stats_transition_weight", 1)
         for name, value in values.items():
             if isinstance(value, torch.Tensor):
                 scalar = value.detach()
@@ -236,6 +238,8 @@ class CommModule(nn.Module, ABC):
                     f"got {type(value).__name__}."
                 )
 
+            if name not in self._MAX_REDUCED_STATS:
+                scalar = scalar * weight
             if name in self._stat_sums:
                 if name in self._MAX_REDUCED_STATS:
                     self._stat_sums[name] = torch.maximum(
@@ -243,10 +247,10 @@ class CommModule(nn.Module, ABC):
                     )
                 else:
                     self._stat_sums[name] = self._stat_sums[name] + scalar
-                self._stat_counts[name] += 1
+                self._stat_counts[name] += weight
             else:
                 self._stat_sums[name] = scalar.clone()
-                self._stat_counts[name] = 1
+                self._stat_counts[name] = weight
 
     def communication_stats(self) -> dict[str, float]:
         """Return small, non-differentiable averages since the last reset."""

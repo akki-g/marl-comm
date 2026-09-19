@@ -252,8 +252,7 @@ def _unique_parameters(modules: Iterable[torch.nn.Module]) -> list[torch.nn.Para
     return list(parameters.values())
 
 
-def parameter_counts(experiment: Any) -> dict[str, int]:
-    actor_modules = list(experiment.group_policies.values())
+def _model_parameter_counts(actor_modules, critic_modules) -> dict[str, int]:
     actor_parameters = _unique_parameters(actor_modules)
 
     comm_modules: dict[int, CommModule] = {}
@@ -263,11 +262,6 @@ def parameter_counts(experiment: Any) -> dict[str, int]:
                 comm_modules.setdefault(id(module), module)
     comm_parameters = _unique_parameters(comm_modules.values())
 
-    critic_modules = []
-    for loss in experiment.losses.values():
-        critic = getattr(loss, "critic_network", None)
-        if isinstance(critic, torch.nn.Module):
-            critic_modules.append(critic)
     critic_parameters = _unique_parameters(critic_modules)
 
     return {
@@ -286,8 +280,55 @@ def parameter_counts(experiment: Any) -> dict[str, int]:
     }
 
 
+def parameter_counts(experiment: Any) -> dict[str, int]:
+    """Keep aggregate counts and expose the same accounting for each group.
+
+    ``actor_total`` includes the communication parameters; communication is
+    reported separately as a subset, never added a second time. All counts
+    deduplicate parameter identities, including framework-shared modules.
+    Flat group keys remain compatible with tidy scalar setup metrics.
+    """
+    critics = {
+        group: critic
+        for group, loss in experiment.losses.items()
+        if isinstance(critic := getattr(loss, "critic_network", None), torch.nn.Module)
+    }
+    counts = _model_parameter_counts(
+        list(experiment.group_policies.values()), list(critics.values())
+    )
+    for group, actor in experiment.group_policies.items():
+        critic_modules = [critics[group]] if group in critics else []
+        for name, count in _model_parameter_counts([actor], critic_modules).items():
+            counts[f"group/{group}/{name}"] = count
+    return counts
+
+
+def task_runtime_contract(experiment: Any) -> dict[str, Any]:
+    """Runtime semantic versions shared by managed runs and analysis artifacts.
+
+    These name implemented semantics, not an approved scientific configuration
+    or a launch authorization. The evaluation guard also affects stock tasks,
+    whose historical trajectories therefore retain their original provenance.
+    """
+    contract = {
+        "schema_version": 1,
+        "evaluation_randomness_protocol": "evaluation_rng_v2",
+        "channel_randomness_protocol": "channel_rng_v2",
+        "training_health_protocol": "training_health_v1",
+    }
+    task_contract = getattr(getattr(experiment, "task", None), "runtime_contract", None)
+    if callable(task_contract):
+        contract.update(task_contract(experiment.test_env))
+    return contract
+
+
 def _resolved_document(spec: ExperimentSpec, experiment: Any | None = None) -> dict[str, Any]:
-    document: dict[str, Any] = {"commstudy": to_serializable(spec)}
+    from commstudy.experiments.config import resolved_experiment_dict, scientific_config_sha256
+
+    document: dict[str, Any] = {
+        "commstudy": resolved_experiment_dict(spec),
+        "scientific_config_sha256": scientific_config_sha256(spec),
+    }
     if experiment is not None:
         document["benchmarl"] = {
             "experiment": to_serializable(vars(experiment.config)),
@@ -390,6 +431,9 @@ class RunRecorder:
         self.overrides = tuple(overrides)
 
     def start(self) -> None:
+        from commstudy.experiments.config import scientific_config_sha256
+        from commstudy.experiments.provenance import source_fingerprint
+
         self.context.suite_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.context.run_dir.mkdir(parents=False, exist_ok=False)
@@ -422,6 +466,14 @@ class RunRecorder:
             "overrides": list(self.overrides),
             "git": capture_git_state(self.repo_root, self.context.run_dir),
             "versions": capture_versions(),
+            "scientific_config_sha256": scientific_config_sha256(self.spec),
+            "source_sha256": source_fingerprint(Path(__file__).resolve().parents[3]),
+            "communication_modules": {
+                group: model.get("params", {}).get("comm_class_path")
+                for group, model in self.spec.model_config.get(
+                    "groups", {"agents": self.spec.model_config}
+                ).items()
+            },
             "runtime": {
                 "platform": platform.platform(),
                 "hostname": platform.node(),
@@ -466,6 +518,7 @@ class RunRecorder:
 
     def record_experiment(self, experiment: Any) -> None:
         metadata = read_json(self.context.metadata_path, {})
+        metadata["task_runtime_contract"] = task_runtime_contract(experiment)
         metadata["parameters"] = parameter_counts(experiment)
         metadata["benchmarl_output"] = str(Path(experiment.folder_name).resolve())
         metadata["runtime"]["sampling_device"] = str(experiment.config.sampling_device)

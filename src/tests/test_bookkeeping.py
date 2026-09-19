@@ -115,6 +115,11 @@ def test_recorder_writes_atomic_lifecycle_and_policy_checkpoint(
     assert metadata["status"] == "completed"
     assert metadata["parameters"]["actor_total"] == 8
     assert metadata["parameters"]["critic_total"] == 5
+    assert metadata["parameters"]["group/agents/actor_total"] == 8
+    assert metadata["parameters"]["group/agents/critic_total"] == 5
+    contract = metadata["task_runtime_contract"]
+    assert contract["evaluation_randomness_protocol"] == "evaluation_rng_v2"
+    assert contract["channel_randomness_protocol"] == "channel_rng_v2"
     assert summary["mean_final_return"] == pytest.approx(18.5)
     checkpoint = context.run_dir / metadata["policy_checkpoint"]
     payload = torch.load(checkpoint, weights_only=False)

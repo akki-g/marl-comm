@@ -246,16 +246,21 @@ def test_policy_rejects_unreplayed_train_time_gaussian_noise(
     config_root,
     tmp_path,
 ):
-    spec = load_experiment_spec(
-        config_root,
-        [
+    overrides = [
             "model=comm_attention",
             "model_config.params.comm_kwargs.channel.type=gaussian",
             "model_config.params.comm_kwargs.channel.std=0.5",
             "model_config.params.comm_kwargs.channel.mode=always",
             "experiment.evaluation=false",
-        ],
-    )
+    ]
+    with pytest.raises(ValueError, match="not replay-safe"):
+        load_experiment_spec(config_root, overrides)
+
+    # Programmatic specs must receive the same rejection before output setup.
+    spec = load_experiment_spec(config_root, ["model=comm_attention"])
+    spec.model_config["params"]["comm_kwargs"]["channel"] = {
+        "type": "gaussian", "std": 0.5, "mode": "always",
+    }
     spec = dataclasses.replace(
         spec,
         experiment={**spec.experiment, "save_folder": str(tmp_path)},

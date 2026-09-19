@@ -14,6 +14,7 @@ from commstudy.experiments.sweeps import (
     select_plans,
     sync_manifest_status,
     write_manifest,
+    validate_plan,
 )
 
 
@@ -33,6 +34,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--run", action="store_true", help="Execute selected rows.")
     parser.add_argument("--dry-run", action="store_true", help="Print without training.")
+    parser.add_argument(
+        "--validate-launch",
+        action="store_true",
+        help="Check protocol/evidence before submitting any training job.",
+    )
     parser.add_argument("--index", type=int, help="Zero-based manifest/Slurm array index.")
     parser.add_argument(
         "--count",
@@ -126,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         # their isolated status.json. A later unselected invocation syncs it.
         plans = (
             read_manifest(manifest_path)
-            if args.index is not None or args.run_id is not None
+            if args.index is not None or args.run_id is not None or args.validate_launch
             else sync_manifest_status(manifest_path, stale_after=args.reclaim_stale)
         )
 
@@ -138,6 +144,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     selected = select_plans(plans, index=args.index, run_id=args.run_id, count=args.count)
+    if args.validate_launch:
+        for plan in selected:
+            validate_plan(
+                plan,
+                config_root=repo_root / "configs",
+                repo_root=repo_root,
+                extra_overrides=extra_overrides,
+                check_runtime=False,
+            )
+        print(f"Launch preflight passed: {len(selected)} rows")
+        if not args.run:
+            return 0
     print(format_plan_table(selected))
     if not args.run:
         return 0

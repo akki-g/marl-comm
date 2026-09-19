@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -26,7 +27,9 @@ from commstudy.experiments.bookkeeping import (
     scheduler_identity,
     seconds_since_heartbeat,
 )
-from commstudy.experiments.config import load_experiment_spec
+from commstudy.experiments.config import (
+    load_experiment_spec, resolved_experiment_dict, scientific_config_sha256,
+)
 from commstudy.experiments.sweeps import (
     DEFAULT_STALE_AFTER_SECONDS,
     RunPlan,
@@ -48,6 +51,9 @@ def _status(run_dir, status, *, heartbeat_age_seconds=None, omit_heartbeat=False
 
 
 def _plan(tmp_path, run_id="run", status="pending"):
+    overrides = ("model=comm_identity", "seed=0", "experiment.max_n_frames=6000",
+                 "experiment.evaluation=false")
+    spec = load_experiment_spec(Path(__file__).resolve().parents[2] / "configs", overrides)
     return RunPlan(
         run_id=run_id,
         suite_id="suite",
@@ -60,8 +66,10 @@ def _plan(tmp_path, run_id="run", status="pending"):
         max_n_frames=6_000,
         status=status,
         output_root=tmp_path / "runs",
-        overrides=("model=comm_identity", "seed=0"),
+        overrides=overrides,
         command="uv run python scripts/train.py",
+        resolved_spec=resolved_experiment_dict(spec),
+        scientific_hash=scientific_config_sha256(spec),
     )
 
 
@@ -98,7 +106,8 @@ def test_terminal_rows_are_never_stale(tmp_path, status):
 
 
 def test_execute_plan_leaves_a_live_running_row_alone(tmp_path):
-    plan = _plan(tmp_path)
+    # Existing legacy owners are left alone without requiring a launchable snapshot.
+    plan = dataclasses.replace(_plan(tmp_path), resolved_spec=None, scientific_hash=None)
     _status(plan.output_root / plan.suite_id / plan.run_id, STATUS_RUNNING, heartbeat_age_seconds=1)
 
     result, experiment = execute_plan(
@@ -142,10 +151,13 @@ def test_execute_plan_retries_a_stale_row_under_a_new_id(tmp_path, config_root):
     assert run_dir.exists()
     assert result.run_id == f"{plan.run_id}__retry01"
     assert result.retry_of == plan.run_id
+    assert result.status == STATUS_COMPLETED
+    assert result.scientific_hash == plan.scientific_hash
+    assert result.resolved_spec == plan.resolved_spec
 
 
 def test_completed_rows_are_never_reclaimed(tmp_path):
-    plan = _plan(tmp_path)
+    plan = dataclasses.replace(_plan(tmp_path), resolved_spec=None, scientific_hash=None)
     _status(
         plan.output_root / plan.suite_id / plan.run_id,
         STATUS_COMPLETED,
@@ -228,3 +240,5 @@ def test_manifest_roundtrip_preserves_retry_lineage(tmp_path):
     (restored,) = read_manifest(manifest)
     assert restored.retry_of == "base"
     assert restored.attempt == 2
+    assert restored.resolved_spec == plan.resolved_spec
+    assert restored.scientific_hash == plan.scientific_hash

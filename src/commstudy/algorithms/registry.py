@@ -9,6 +9,7 @@ from benchmarl.algorithms import (
 )
 
 from benchmarl.algorithms.common import AlgorithmConfig
+from commstudy.utils.validation import dataclass_values, number
 
 
 _ALGORITHM_REGISTRY: dict[str, type[AlgorithmConfig]] = {
@@ -52,6 +53,19 @@ def resolve_algorithm(
 
     if params is None:
         return config
+
+    dataclass_values(config_class, params, "algorithm_config.params")
+    for key in ("entropy_coef", "critic_coef"):
+        if key in params:
+            number(params[key], f"algorithm_config.params.{key}")
+    for key in ("clip_epsilon", "lmbda"):
+        if key in params:
+            number(params[key], f"algorithm_config.params.{key}", maximum=1)
+    if "mixing_embed_dim" in params:
+        number(params["mixing_embed_dim"], "algorithm_config.params.mixing_embed_dim", minimum=1)
+    for key in ("loss_critic_type", "loss_function"):
+        if key in params and params[key] not in {"l1", "l2", "smooth_l1"}:
+            raise ValueError(f"algorithm_config.params.{key} must be l1, l2, or smooth_l1.")
 
     for key, value in params.items():
         if not hasattr(config, key):

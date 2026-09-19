@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "mapdn"
+version = "0.1.0"
+description = "Multi-Agent Power Distribution Network environments for distributed active voltage control"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { file = "LICENSE" }
+
+dependencies = [
+    "numpy>=2.0,<2.3",
+    "pandas>=2.2,<3.0",
+    "pandapower==3.3.0",
+    "plotly>=5,<7",
+
+    "gymnasium>=1.0,<2",
+    "pettingzoo>=1.24,<2",
+]
+
+
+[project.optional-dependencies]
+rl = [
+    "torch>=2.0",
+    "tensorboardX>=2.6",
+]
+render = [
+    "gym>=0.21",
+    "pyglet>=1.5",
+    "six",
+]
+
+[project.urls]
+Homepage = "https://github.com/Future-Power-Networks/MAPDN"
+Repository = "https://github.com/Future-Power-Networks/MAPDN"
+
+
+# ---------------------------------------------------------------------------
+# Packaging
+#
+# All Python sources live under the single top-level package "mapdn":
+#
+# mapdn/
+# ├── environments/          # var_voltage_control, multiagentenv
+# ├── agents/                # actor networks
+# ├── critics/               # critic networks
+# ├── learning_algorithms/   # ddpg / ppo / actor-critic backends
+# ├── models/                # MARL algorithms + registry
+# └── utilities/             # trainer, tester, replay buffers, helpers
+#
+# so downstream projects can use the short import paths:
+#
+# from mapdn.environments import VoltageControl
+# from mapdn.models import Model, Strategy
+# ---------------------------------------------------------------------------
+
+[tool.setuptools.packages.find]
+include = ["mapdn*"]

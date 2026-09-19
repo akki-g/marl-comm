@@ -1,8 +1,4 @@
-# First managed PCP suite: the no-communication control on its own, to
-# establish that the predators learn anything at all on this task before any
-# compute is spent comparing communication mechanisms. Mirrors
-# simple_spread_identity_pilot.yaml with PCP's grouped actor/critic and a
-# scaled-down budget (see the note above `runs`).
+# Historical calibration only; managed PCP execution rejects rows without a corrected protocol approval.
 suite_id: pcp_identity_pilot
 run_namespace: v2
 output_root: runs

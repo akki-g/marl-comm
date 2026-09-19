@@ -14,6 +14,7 @@ from tensordict import TensorDict
 
 from commstudy.communication.base import CommModule
 from commstudy.experiments.bookkeeping import parameter_counts
+from commstudy.experiments.health import TrainingHealthCallback
 from commstudy.experiments.returns import (
     group_collection_returns,
     group_rollout_returns,
@@ -48,6 +49,116 @@ def _scalar(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return scalar if math.isfinite(scalar) else scalar
+
+
+def tensor_health_metrics(value: torch.Tensor, prefix: str) -> dict[str, float]:
+    """Describe actual scalars, keeping the denominator and finite rate explicit."""
+    values = value.detach().reshape(-1).to(dtype=torch.float32)
+    if not values.numel():
+        return {}
+    finite = torch.isfinite(values)
+    metrics = {
+        f"{prefix}_scalar_count": float(values.numel()),
+        f"{prefix}_finite_fraction": float(finite.float().mean().cpu()),
+    }
+    values = values[finite]
+    if values.numel():
+        quantiles = torch.quantile(values, values.new_tensor([0.01, 0.5, 0.99]))
+        metrics.update({
+            f"{prefix}_mean": float(values.mean().cpu()),
+            f"{prefix}_std": float(values.std(correction=0).cpu()),
+            f"{prefix}_min": float(values.min().cpu()),
+            f"{prefix}_max": float(values.max().cpu()),
+            **{f"{prefix}_{name}": float(v.cpu()) for name, v in zip(
+                ("q01", "q50", "q99"), quantiles, strict=True
+            )},
+        })
+    return metrics
+
+
+def group_health_metrics(batch, group: str) -> dict[str, float]:
+    """Never discover or concatenate another group's policy output leaves."""
+    metrics: dict[str, float] = {"health_transition_count": float(batch.numel())}
+    for key in ("loc", "scale", "action", "value_target", "advantage", "state_value"):
+        value = batch.get((group, key), None)
+        if isinstance(value, torch.Tensor) and value.is_floating_point():
+            metrics.update(tensor_health_metrics(value, key))
+            if key == "action":
+                metrics["action_saturated_fraction"] = float(
+                    (value.detach().abs() > 0.999).float().mean().cpu()
+                )
+    return metrics
+
+
+class CommunicationHealthObserver:
+    """Bounded detached sums; each forward is weighted by environment transitions.
+
+    Norms describe the net residual contribution of all configured rounds.
+    Gate saturation has its own sender-round denominator. Optimization metrics
+    describe replay compute and are kept in training rows, never deployed cost.
+    """
+
+    def __init__(self, module: CommModule, checking_replay: Callable[[], bool]):
+        self.module = module
+        self.checking_replay = lambda: checking_replay() or getattr(
+            module, "_health_replay_check", False
+        )
+        self.sums: dict[str, float] = {}
+        self.counts: dict[str, int] = {}
+        self.transitions = 0
+        self.agent_transitions = 0
+        self.handles = [module.register_forward_pre_hook(self._before),
+                        module.register_forward_hook(self._after)]
+        gate = getattr(module, "gate_network", None)
+        if isinstance(gate, torch.nn.Module):
+            self.handles.append(gate.register_forward_hook(self._gate))
+
+    def _before(self, module, args):
+        if not self.checking_replay():
+            h = args[0]
+            module._stats_transition_weight = h.numel() // (h.shape[-2] * h.shape[-1])
+
+    def _add(self, key: str, value: torch.Tensor):
+        value = value.detach()
+        self.sums[key] = self.sums.get(key, 0.0) + float(value.sum().cpu())
+        self.counts[key] = self.counts.get(key, 0) + value.numel()
+
+    def _after(self, module, args, output):
+        if self.checking_replay():
+            return
+        h = args[0].detach()
+        encoder = h.norm(dim=-1)
+        delta = (output.detach() - h).norm(dim=-1)
+        self.transitions += h.numel() // (h.shape[-2] * h.shape[-1])
+        self.agent_transitions += encoder.numel()
+        self._add("encoder_norm_mean", encoder)
+        self._add("contribution_norm_mean", delta)
+        positive = encoder > 0
+        self._add("zero_encoder_fraction", (~positive).float())
+        self._add("contribution_to_encoder_norm_ratio", delta[positive] / encoder[positive])
+        if module.normalize_comm_path:
+            self._add("normalization_gain", module.comm_path_scale.detach().expand_as(encoder))
+
+    def _gate(self, module, args, output):
+        del module, args
+        if self.checking_replay():
+            return
+        gate = output.detach().sigmoid()
+        self._add("gate_saturated_low_fraction", (gate < 0.01).float())
+        self._add("gate_saturated_high_fraction", (gate > 0.99).float())
+
+    def drain(self) -> dict[str, float]:
+        result = {key: value / self.counts[key] for key, value in self.sums.items()
+                  if self.counts[key]}
+        result["transition_count"] = float(self.transitions)
+        result["agent_transition_count"] = float(self.agent_transitions)
+        for name in ("contribution_to_encoder_norm_ratio", "gate_saturated_low_fraction"):
+            if name in self.counts:
+                result[f"{name}_count"] = float(self.counts[name])
+        self.sums.clear()
+        self.counts.clear()
+        self.transitions = self.agent_transitions = 0
+        return result
 
 
 class TidyMetricsWriter:
@@ -115,6 +226,9 @@ class ExperimentMetricsCallback(Callback):
             None if return_groups is None else tuple(str(g) for g in return_groups)
         )
         self._return_groups: tuple[str, ...] = ()
+        self._comm_observers: dict[int, CommunicationHealthObserver] = {}
+        self._pcp_domain = False
+        self._mapdn_domain = False
 
     def _elapsed(self) -> float:
         if self._wall_start is None:
@@ -137,6 +251,9 @@ class ExperimentMetricsCallback(Callback):
             get_stats = getattr(module, "communication_stats", None)
             if callable(get_stats):
                 stats = get_stats()
+                observer = self._comm_observers.get(id(module))
+                if observer is not None:
+                    stats.update(observer.drain())
                 for key, value in stats.items():
                     scalar = _scalar(value)
                     if scalar is not None:
@@ -161,12 +278,24 @@ class ExperimentMetricsCallback(Callback):
 
     def on_setup(self) -> None:
         self._wall_start = time.perf_counter()
+        self._pcp_domain = (
+            getattr(getattr(self.experiment, "task", None), "name", "").lower()
+            == "predator_capture_prey"
+        )
+        env_name = getattr(getattr(self.experiment, "task", None), "env_name", lambda: "")
+        self._mapdn_domain = env_name() == "mapdn"
         # Resolved here so a mistyped group name fails at run start rather than
         # producing a study whose headline metric is quietly absent.
         self._return_groups = resolve_return_groups(
             self.experiment.group_map,
             self._configured_return_groups,
         )
+        self._comm_observers = {
+            id(module): CommunicationHealthObserver(
+                module, lambda: getattr(self.experiment, "_checking_policy_replay", False)
+            )
+            for module in self._comm_modules()
+        }
         counts = parameter_counts(self.experiment)
         metrics = {f"parameters_{key}": value for key, value in counts.items()}
         self.writer.write(
@@ -192,7 +321,8 @@ class ExperimentMetricsCallback(Callback):
         metrics: dict[str, Any] = {"wall_time_seconds": self._elapsed()}
         if study_return is not None:
             metrics["return_mean"] = study_return
-        comm_stats = self._drain_comm_stats()
+        per_group_comm = self._write_group_health("collection", batch)
+        comm_stats = self._study_comm_metrics(per_group_comm)
         metrics.update(comm_stats)
         self.writer.write(
             frames=self.experiment.total_frames,
@@ -201,13 +331,45 @@ class ExperimentMetricsCallback(Callback):
             metrics=metrics,
         )
         self._write_group_returns("collection", per_group)
+        if self._mapdn_domain:
+            self.writer.write(
+                frames=self.experiment.total_frames,
+                iteration=self.experiment.n_iters_performed,
+                phase="collection_domain", group="agents",
+                metrics=self.experiment.task.log_info(batch),
+            )
+        if self._pcp_domain:
+            from commstudy.analysis.pcp_domain import domain_transition_series
+
+            domain = domain_transition_series(batch)
+            self.writer.write(
+                frames=self.experiment.total_frames,
+                iteration=self.experiment.n_iters_performed,
+                phase="collection_domain",
+                group="adversary",
+                metrics={
+                    **{name + "_mean": float(value.mean().cpu())
+                       for name, value in domain.items()},
+                    "transition_count": float(batch.numel()),
+                    "reward_accounting_max_abs_error": float(
+                        (domain["predator_reward"] - domain["expected_predator_reward"])
+                        .abs().max().cpu()
+                    ),
+                },
+            )
         self._forward_to_benchmarl(comm_stats, "collection/communication")
 
     def on_train_step(self, batch, group: str) -> TensorDict | None:
-        del batch
         comm_stats = self._drain_comm_stats(group)
-        if not comm_stats:
-            return None
+        # These are the sampled optimization transitions, including repeated
+        # replay passes. They are not extra deployed environment interactions.
+        comm_stats["optimization_transition_count"] = float(batch.numel())
+        for key in ("value_target", "advantage", "state_value"):
+            value = batch.get((group, key), None)
+            if isinstance(value, torch.Tensor):
+                comm_stats.update({name: scalar for name, scalar in
+                                   tensor_health_metrics(value, key).items()
+                                   if not name.endswith(("_q01", "_q50", "_q99"))})
         device = torch.device(self.experiment.config.train_device)
         return TensorDict(
             {key: torch.tensor(value, device=device) for key, value in comm_stats.items()},
@@ -222,6 +384,37 @@ class ExperimentMetricsCallback(Callback):
             scalar = _scalar(value)
             if scalar is not None:
                 metrics[name] = scalar
+        # Framework losses/KL/ESS retain their upstream minibatch summaries.
+        # Our transition denominators count every replayed transition, while
+        # moments are pooled using their actual scalar/transition counts.
+        for name in list(metrics):
+            value = training_td.get(name, None)
+            if isinstance(value, torch.Tensor) and name.endswith("_count"):
+                metrics[name] = float(value.sum().cpu())
+            elif isinstance(value, torch.Tensor) and name.startswith("comm_"):
+                if name.removeprefix("comm_") in CommModule._MAX_REDUCED_STATS:
+                    metrics[name] = float(value.max().cpu())
+                    continue
+                count_key = (f"{name}_count" if name.endswith("norm_ratio") else
+                             "comm_gate_saturated_low_fraction_count"
+                             if "gate_saturated_" in name else "comm_transition_count")
+                weights = training_td.get(count_key, None)
+                if isinstance(weights, torch.Tensor) and bool(weights.sum() > 0):
+                    metrics[name] = float((value * weights).sum().cpu() / weights.sum().cpu())
+        for prefix in ("value_target", "advantage", "state_value"):
+            weights = training_td.get(f"{prefix}_scalar_count", None)
+            if weights is None:
+                continue
+            mean = training_td.get(f"{prefix}_mean")
+            std = training_td.get(f"{prefix}_std")
+            pooled_mean = (mean * weights).sum() / weights.sum()
+            variance = ((std.square() + mean.square()) * weights).sum() / weights.sum()
+            metrics[f"{prefix}_mean"] = float(pooled_mean.cpu())
+            metrics[f"{prefix}_std"] = float(
+                (variance - pooled_mean.square()).clamp_min(0).sqrt().cpu()
+            )
+            metrics[f"{prefix}_min"] = float(training_td.get(f"{prefix}_min").min().cpu())
+            metrics[f"{prefix}_max"] = float(training_td.get(f"{prefix}_max").max().cpu())
         metrics["wall_time_seconds"] = self._elapsed()
         self.writer.write(
             frames=self.experiment.total_frames,
@@ -230,6 +423,32 @@ class ExperimentMetricsCallback(Callback):
             group=group,
             metrics=metrics,
         )
+
+    def _study_comm_metrics(self, per_group: Mapping[str, dict[str, float]]) -> dict[str, float]:
+        measured = [per_group[g] for g in self._return_groups if g in per_group]
+        # Preserve existing single measured-group analysis keys without mixing
+        # dimensions, parameter counts, or costs from unrelated groups.
+        return measured[0] if len(measured) == 1 else {}
+
+    def _write_group_health(self, phase: str, batch) -> dict[str, dict[str, float]]:
+        per_group_comm = {}
+        for group in self.experiment.group_map:
+            metrics = group_health_metrics(batch, group)
+            comm = self._drain_comm_stats(group)
+            per_group_comm[group] = comm
+            metrics.update(comm)
+            if phase == "collection":
+                for callback in self.experiment.callbacks:
+                    if isinstance(callback, TrainingHealthCallback):
+                        metrics.update(callback.replay_metrics.get(group, {}))
+            self.writer.write(
+                frames=self.experiment.total_frames,
+                iteration=self.experiment.n_iters_performed,
+                phase=phase,
+                group=group,
+                metrics=metrics,
+            )
+        return per_group_comm
 
     def _measured(self, per_group: Mapping[str, float]) -> dict[str, float]:
         """Keep only the groups whose reward the study reports."""
@@ -287,7 +506,15 @@ class ExperimentMetricsCallback(Callback):
                 }
             )
         metrics["wall_time_seconds"] = self._elapsed()
-        comm_stats = self._drain_comm_stats()
+        # BenchMARL supplies one complete TensorDict per episode, possibly of
+        # different lengths. Flatten and concatenate for transition-weighted
+        # moments/quantiles rather than averaging episode summaries.
+        flat_rollouts = [rollout.reshape(-1) for rollout in rollouts]
+        per_group_comm = (
+            self._write_group_health("evaluation", torch.cat(flat_rollouts, dim=0))
+            if flat_rollouts else {}
+        )
+        comm_stats = self._study_comm_metrics(per_group_comm)
         metrics.update(comm_stats)
         self.writer.write(
             frames=self.experiment.total_frames,
@@ -310,5 +537,48 @@ class ExperimentMetricsCallback(Callback):
                 phase="evaluation",
                 metrics={"return_episode": value},
                 sample=index,
+            )
+        if self._mapdn_domain:
+            for index, rollout in enumerate(rollouts):
+                self.writer.write(
+                    frames=self.experiment.total_frames,
+                    iteration=self.experiment.n_iters_performed,
+                    phase="evaluation_domain_episode", group="agents", sample=index,
+                    metrics=self.experiment.task.log_info(rollout),
+                )
+            if flat_rollouts:
+                self.writer.write(
+                    frames=self.experiment.total_frames,
+                    iteration=self.experiment.n_iters_performed,
+                    phase="evaluation_domain", group="agents",
+                    metrics=self.experiment.task.log_info(torch.cat(flat_rollouts, dim=0)),
+                )
+        if self._pcp_domain:
+            from commstudy.analysis.pcp_domain import (
+                domain_episode_metrics, summarize_domain_episodes,
+            )
+
+            domain_episodes = []
+            for index, rollout in enumerate(rollouts):
+                episode_metrics = domain_episode_metrics(rollout)
+                domain_episodes.append({"metrics": episode_metrics})
+                self.writer.write(
+                    frames=self.experiment.total_frames,
+                    iteration=self.experiment.n_iters_performed,
+                    phase="evaluation_domain_episode",
+                    group="adversary",
+                    sample=index,
+                    metrics=episode_metrics,
+                )
+            summary = summarize_domain_episodes(domain_episodes)
+            self.writer.write(
+                frames=self.experiment.total_frames,
+                iteration=self.experiment.n_iters_performed,
+                phase="evaluation_domain",
+                group="adversary",
+                metrics={
+                    **summary["means"],
+                    **{key: value for key, value in summary.items() if key != "means"},
+                },
             )
         self._forward_to_benchmarl(comm_stats, "eval/communication")
