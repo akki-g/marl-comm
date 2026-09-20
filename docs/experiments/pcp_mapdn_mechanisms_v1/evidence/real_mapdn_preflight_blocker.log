@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/scripts/communication_suite.py", line 175, in <module>
+    main()
+  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/scripts/communication_suite.py", line 138, in main
+    result = run.preflight(
+             ^^^^^^^^^^^^^^
+  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/src/commstudy/experiments/mechanism_execution.py", line 76, in preflight
+    prepare_mapdn(root, packet, history)
+  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/src/commstudy/experiments/mechanism_data.py", line 181, in prepare_mapdn
+    split = build_split_manifest(
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/src/commstudy/tasks/torchrl/mapdn_data.py", line 189, in build_split_manifest
+    data, profiles = _load_profiles(data_path)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/src/commstudy/tasks/torchrl/mapdn_data.py", line 69, in _load_profiles
+    raise ValueError(f"required nonempty feeder data file missing: {path}")
+ValueError: required nonempty feeder data file missing: /Users/akshatguduru/Desktop/Thesis/marl-comm/data/case33_3min_final/model.p

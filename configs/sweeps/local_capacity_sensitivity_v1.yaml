@@ -1,0 +1,6 @@
+schema_version: 1
+suite: configs/experiments/pcp_mapdn_mechanisms_v1.yaml
+include:
+- capacity
+note: Suite allocation descriptor, consumed via communication_suite.py plan --sweep;
+  not a legacy sweeps.py document.

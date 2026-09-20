@@ -1,0 +1,51 @@
+{
+  "baseline_head": "9eb028ec5ad66bf4dd105623206ffd1c8da7561b",
+  "source_inventory_sha256": "8b0024963a6a612184fc6bf0cc809cc3199c5b8b208626fe47ba52a70b83feec",
+  "plan_identity": "ddbe257dbdca706a5edaf5e3248be1f48694c84ddeae445c80fc2c13c3ebbbcf",
+  "core_plan_root": "/Users/akshatguduru/Desktop/Thesis/communication_comparison_v1_final_plan_20260920_v3",
+  "capacity_preview_root": "/Users/akshatguduru/Desktop/Thesis/communication_comparison_v1_capacity_preview_20260920_v3",
+  "topology_preview_root": "/Users/akshatguduru/Desktop/Thesis/communication_comparison_v1_topology_preview_20260920_v3",
+  "implementation_complete": true,
+  "local_checks_passed": true,
+  "real_pcp_smokes": {
+    "passed": 12,
+    "planned": 12,
+    "source_scope": "recorded development snapshot; fresh target checks required",
+    "later_identity_recheck_passed": true
+  },
+  "real_mapdn_smokes": {
+    "passed": 0,
+    "planned": 6,
+    "blocked_by": "real case33 model.p unavailable"
+  },
+  "cluster_profile_verified": false,
+  "qualification_complete": false,
+  "qualification_policies_executed": 0,
+  "main_ready": false,
+  "scientific_policies_executed": 0,
+  "scientific_policies_planned": 90,
+  "scientific_final_test_rollouts": 0,
+  "scheduler_submissions": 0,
+  "unmeasured": [
+    "Linux full-budget training/evaluation time",
+    "Linux peak RSS",
+    "full-budget serialization/storage growth",
+    "target quota/headroom"
+  ],
+  "pending": [
+    "Newton account/partition/module and allocation probe",
+    "Linux hash-locked wheelhouse/bootstrap",
+    "real case33 data/mapping and historical bank audit",
+    "18 target smokes",
+    "6 full-budget Identity qualifications",
+    "freeze"
+  ],
+  "tests": {
+    "new_suite_passed": 48,
+    "new_suite_seconds": 182.06,
+    "existing_distinct_passed": 1330,
+    "existing_skipped": 2,
+    "existing_subtests_passed": 106,
+    "segmented_existing_regression": true
+  }
+}

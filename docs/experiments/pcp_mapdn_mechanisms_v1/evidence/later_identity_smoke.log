@@ -1,0 +1,400 @@
+/Users/akshatguduru/Desktop/Thesis/marl-comm/.venv/lib/python3.12/site-packages/torchrl/envs/transforms/transforms.py:857: FutureWarning: The default behavior of TransformedEnv will change in version 0.9. Nested TransformedEnvs will no longer be automatically unwrapped by default. To prepare for this change, use set_auto_unwrap_transformed_env(val: bool) as a decorator or context manager, or set the environment variable AUTO_UNWRAP_TRANSFORMED_ENV to 'False'.
+  instance: EnvBase = super(_EnvPostInit, self).__call__(*args, **kwargs)
+/Users/akshatguduru/Desktop/Thesis/marl-comm/.venv/lib/python3.12/site-packages/torchrl/collectors/_base.py:1045: DeprecationWarning: SyncDataCollector has been deprecated and will be removed in v0.13. Please use Collector instead.
+  warnings.warn(
+  0%|          | 0/1 [00:00<?, ?it/s][92m2026-09-20 00:06:15,962 [torchrl][INFO][0m    Initialized LazyTensorStorage with torch.Size([6000]) shape[92m [END][0m
+[92m2026-09-20 00:06:24,179 [torchrl][INFO][0m    Initialized LazyTensorStorage with torch.Size([6000]) shape[92m [END][0m
+mean return = 0.0: 100%|██████████| 1/1 [00:19<00:00, 19.08s/it]mean return = 0.0: 100%|██████████| 1/1 [00:19<00:00, 19.21s/it]
+{
+  "archive_seconds": 1.274370250001084,
+  "artifacts": {
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/archive_readback.json": "080422dfa289f81e76aee0bbfe5402c9409e82a0bb67aeac114383ea5e9cd198",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/managed/smoke_radius1_identity_900/benchmarl/mappo_predator_capture_prey_ensemblemodel__cba4b1b9_26_09_20-00_05_59/checkpoints/checkpoint_6000.pt": "9fed2f24153b48bec9a0fada03d0d3c5375aba9c04f8c5b791c27e9c2bf876ae",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/managed/smoke_radius1_identity_900/checkpoints/policy_state.pt": "1e803e76f2f8635f2f5ca571bc0e39e3c67a9e36702eb55e010fd21a273a46b8",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/managed/smoke_radius1_identity_900/metadata.json": "b9845f3ea8cd2a25be221ab4a88b3201fc36b8123330a712f6bda341d5e7090f",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/managed/smoke_radius1_identity_900/metrics.csv": "f10027525cd864a355f5fd5381672809ab468983b52f0349fb60dfaa83476a42",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/managed/smoke_radius1_identity_900/resolved_config.yaml": "6280518b40446e3e9650dda97b2e824134e22470fbfe7587a6b114b9f3dbce20",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/managed_run.tar.gz": "a3943dd89ee1088d1c1354d60f8f8ad2cc43ca616a1e743562588ebf88691430",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/paired_development.json": "7b3a6cb26cbabd1cc187c16f9a49adcaad326d4e93e367ce9fcf96c4df722207",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/training_summary.json": "83a0cf784acc6211ed85c5f7b22602dc7c340bad19ebafb52b2a1c1514a2c6ab",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/validation_0.json": "ace5e226931422fd396c3e988206a7be3b085e8dc92f6f1ef0904a0082b81cd4",
+    "runs/pcp/smoke_radius1_identity_900/attempt_000/validation_6000.json": "0ec319946cee767685d0491f441bcf4d2c9494e57583ed214ff5bc4fab912e30"
+  },
+  "budget_adequacy": "unresolved; fixed-budget curve retained",
+  "checks": {
+    "actor_changed": true,
+    "actor_finite": true,
+    "exact_batches": true,
+    "exact_development_replay": true,
+    "exact_frames": true,
+    "logged_finite": true,
+    "validation_schedule": true
+  },
+  "development_evaluation_seconds": 11.979732665990014,
+  "elapsed_seconds": 46.57650762499543,
+  "integrity_passed": true,
+  "native_parity": {
+    "actor_critic_restored": true,
+    "actor_sha256": "f4450071fe29d1bb835ad220d7eaad19d5fe66056eb21a98e9d179db8dee35f5",
+    "all_groups": [
+      "adversary",
+      "agent"
+    ],
+    "frames": 6000,
+    "native_actor_matches_rollout": true,
+    "path": "/Users/akshatguduru/Desktop/Thesis/communication_comparison_v1_handoff_20260920/runs/pcp/smoke_radius1_identity_900/attempt_000/managed/smoke_radius1_identity_900/benchmarl/mappo_predator_capture_prey_ensemblemodel__cba4b1b9_26_09_20-00_05_59/checkpoints/checkpoint_6000.pt",
+    "sha256": "9fed2f24153b48bec9a0fada03d0d3c5375aba9c04f8c5b791c27e9c2bf876ae"
+  },
+  "parameter_counts": {
+    "actor_total": 19488,
+    "actor_trainable": 19488,
+    "communication_total": 0,
+    "communication_trainable": 0,
+    "critic_total": 19778,
+    "critic_trainable": 19778,
+    "group/adversary/actor_total": 19332,
+    "group/adversary/actor_trainable": 19332,
+    "group/adversary/communication_total": 0,
+    "group/adversary/communication_trainable": 0,
+    "group/adversary/critic_total": 19585,
+    "group/adversary/critic_trainable": 19585,
+    "group/adversary/encoder_trainable": 18816,
+    "group/adversary/head_trainable": 516,
+    "group/agent/actor_total": 156,
+    "group/agent/actor_trainable": 156,
+    "group/agent/communication_total": 0,
+    "group/agent/communication_trainable": 0,
+    "group/agent/critic_total": 193,
+    "group/agent/critic_trainable": 193,
+    "group/agent/encoder_trainable": 0,
+    "group/agent/head_trainable": 0
+  },
+  "peak_rss_native_units": 312410112,
+  "peak_rss_units": "bytes",
+  "plan_sha256": "c6a53d7186621295d66356997796674393c727c74a561b8e915a33bd0a0e5b5b",
+  "receipt_path": "runs/pcp/smoke_radius1_identity_900/attempt_000/receipt.json",
+  "retained_bytes": 14538252,
+  "retained_files": 183,
+  "row": {
+    "cohort": "core",
+    "condition": "radius1",
+    "frames": 6000,
+    "index": 0,
+    "method": "identity",
+    "run_id": "smoke_radius1_identity_900",
+    "scientific_config_sha256": "68f6ad27f1344f04b36936bfa8c996135244a1ce98ac06cc7bf1c5e6537770bc",
+    "seed": 900,
+    "sha256": "baaf7c97b5a7471257665c45b7ac2cef09670ee98bd2acee21cefa4d94d7f6ee",
+    "spec": {
+      "algorithm": "mappo",
+      "algorithm_config": {
+        "params": {
+          "clip_epsilon": 0.2,
+          "critic_coef": 1.0,
+          "entropy_coef": 0.1,
+          "lmbda": 0.9,
+          "loss_critic_type": "l2",
+          "minibatch_advantage": false,
+          "scale_mapping": "biased_softplus_1.0",
+          "share_param_critic": true,
+          "use_tanh_normal": true
+        }
+      },
+      "critic_model": {
+        "groups": {
+          "adversary": {
+            "model_type": "benchmarl_mlp",
+            "params": {
+              "activation_class_path": "torch.nn.Tanh",
+              "activation_kwargs": null,
+              "layer_class_path": "torch.nn.Linear",
+              "norm_class_path": null,
+              "norm_kwargs": null,
+              "num_cells": [
+                128,
+                128
+              ],
+              "num_feature_dims": 1
+            }
+          },
+          "agent": {
+            "model_type": "benchmarl_mlp",
+            "params": {
+              "activation_class_path": "torch.nn.Tanh",
+              "activation_kwargs": null,
+              "layer_class_path": "torch.nn.Linear",
+              "norm_class_path": null,
+              "norm_kwargs": null,
+              "num_cells": [
+                8
+              ],
+              "num_feature_dims": 1
+            }
+          }
+        }
+      },
+      "experiment": {
+        "adam_eps": 1e-06,
+        "adam_extra_kwargs": {},
+        "buffer_device": "cpu",
+        "checkpoint_at_end": true,
+        "checkpoint_interval": 6000,
+        "clip_grad_norm": true,
+        "clip_grad_val": 5,
+        "collect_with_grad": false,
+        "create_json": true,
+        "evaluation": false,
+        "evaluation_deterministic_actions": true,
+        "evaluation_episodes": 128,
+        "evaluation_interval": 12000,
+        "evaluation_static": false,
+        "exclude_buffer_from_checkpoint": false,
+        "exploration_anneal_frames": null,
+        "exploration_eps_end": 0.01,
+        "exploration_eps_init": 0.8,
+        "gamma": 0.95,
+        "hard_target_update_frequency": 5,
+        "keep_checkpoints_num": null,
+        "loggers": [
+          "csv"
+        ],
+        "lr": 5e-05,
+        "max_n_frames": 6000,
+        "max_n_iters": null,
+        "off_policy_collected_frames_per_batch": 6000,
+        "off_policy_init_random_frames": 0,
+        "off_policy_memory_size": 1000000,
+        "off_policy_n_envs_per_worker": 10,
+        "off_policy_n_optimizer_steps": 1000,
+        "off_policy_prb_alpha": 0.6,
+        "off_policy_prb_beta": 0.4,
+        "off_policy_train_batch_size": 128,
+        "off_policy_use_prioritized_replay_buffer": false,
+        "on_policy_collected_frames_per_batch": 6000,
+        "on_policy_minibatch_size": 400,
+        "on_policy_n_envs_per_worker": 10,
+        "on_policy_n_minibatch_iters": 10,
+        "parallel_collection": false,
+        "polyak_tau": 0.005,
+        "prefer_continuous_actions": true,
+        "project_name": "commstudy",
+        "render": false,
+        "restore_file": null,
+        "restore_map_location": null,
+        "sampling_device": "cpu",
+        "save_folder": null,
+        "share_policy_params": true,
+        "soft_target_update": true,
+        "train_device": "cpu",
+        "wandb_extra_kwargs": {}
+      },
+      "model": "pcp_mechanisms_identity",
+      "model_config": {
+        "groups": {
+          "adversary": {
+            "model_type": "communication",
+            "params": {
+              "activation_class_path": "torch.nn.Tanh",
+              "actor_observation_keys": [
+                "observation"
+              ],
+              "comm_class_path": "commstudy.communication.identity.IdentityComm",
+              "comm_context_keys": {},
+              "comm_kwargs": {
+                "grad_clip": null,
+                "normalize_comm_path": false
+              },
+              "hidden_dim": 128,
+              "num_encoder_layers": 2,
+              "num_roles": 2,
+              "use_role_embedding": false
+            }
+          },
+          "agent": {
+            "model_type": "benchmarl_mlp",
+            "params": {
+              "activation_class_path": "torch.nn.Tanh",
+              "activation_kwargs": null,
+              "layer_class_path": "torch.nn.Linear",
+              "norm_class_path": null,
+              "norm_kwargs": null,
+              "num_cells": [
+                8
+              ],
+              "num_feature_dims": 1
+            }
+          }
+        }
+      },
+      "seed": 900,
+      "task": "vmas_predator_capture_prey",
+      "task_config": {
+        "params": {
+          "adversaries_share_rew": true,
+          "agents_share_rew": false,
+          "bound": 1.0,
+          "max_steps": 100,
+          "num_adversaries": 3,
+          "num_good_agents": 1,
+          "num_landmarks": 2,
+          "observe_pos": true,
+          "observe_same_team": true,
+          "observe_vel": true,
+          "predator_sensing_radius": 1.0,
+          "prey_boundary_margin": 0.3,
+          "prey_detection_radius": 0.8,
+          "prey_min_flee_frac": 0.3,
+          "prey_noise_std": 0.05,
+          "prey_obstacle_margin": 0.4,
+          "prey_wander_force": 0.15,
+          "respawn_at_catch": false,
+          "shape_adversary_rew": false,
+          "shape_agent_rew": false
+        },
+        "return_groups": [
+          "adversary"
+        ]
+      }
+    },
+    "stage": "smoke",
+    "task": "pcp"
+  },
+  "status": "completed",
+  "training_summary_path": "/Users/akshatguduru/Desktop/Thesis/communication_comparison_v1_handoff_20260920/runs/pcp/smoke_radius1_identity_900/attempt_000/training_summary.json",
+  "validation": [
+    {
+      "frames": 0,
+      "summaries": {
+        "live": {
+          "any_contact": 0.0,
+          "any_simultaneous_contact": 0.0,
+          "complete": 1.0,
+          "contact_by_deadline": 0.0,
+          "contact_duration_steps": 0.0,
+          "contact_pair_steps": 0.0,
+          "contacting_predators_max": 0.0,
+          "contacting_predators_mean": 0.0,
+          "episode_steps": 100.0,
+          "first_contact_observed": 0.0,
+          "first_contact_step_or_horizon": 100.0,
+          "mean_predator_nearest_prey_distance": 0.8664801080524921,
+          "nearest_predator_prey_distance_mean": 0.7564532991498709,
+          "nearest_predator_prey_distance_min": 0.38183896988630295,
+          "predator_boundary_fraction": 0.7466666716337205,
+          "predator_obstacle_collision_pair_steps": 0.5,
+          "predator_teammate_collision_pair_steps": 4.0,
+          "prey_boundary_fraction": 0.0,
+          "prey_visible_to_0_predators_mean": 0.23,
+          "prey_visible_to_1_predators_mean": 0.055,
+          "prey_visible_to_2_predators_mean": 0.215,
+          "prey_visible_to_3_predators_mean": 0.5,
+          "return": 0.0,
+          "reward_accounting_max_abs_error": 0.0,
+          "sender_visible_receiver_blind_pairs_mean": 0.54,
+          "sender_visible_receiver_blind_prey_triples_mean": 0.54,
+          "simultaneous_contact_steps": 0.0,
+          "terminated": 0.0,
+          "truncated": 1.0
+        },
+        "severed": {
+          "any_contact": 0.0,
+          "any_simultaneous_contact": 0.0,
+          "complete": 1.0,
+          "contact_by_deadline": 0.0,
+          "contact_duration_steps": 0.0,
+          "contact_pair_steps": 0.0,
+          "contacting_predators_max": 0.0,
+          "contacting_predators_mean": 0.0,
+          "episode_steps": 100.0,
+          "first_contact_observed": 0.0,
+          "first_contact_step_or_horizon": 100.0,
+          "mean_predator_nearest_prey_distance": 0.8664801080524921,
+          "nearest_predator_prey_distance_mean": 0.7564532991498709,
+          "nearest_predator_prey_distance_min": 0.38183896988630295,
+          "predator_boundary_fraction": 0.7466666716337205,
+          "predator_obstacle_collision_pair_steps": 0.5,
+          "predator_teammate_collision_pair_steps": 4.0,
+          "prey_boundary_fraction": 0.0,
+          "prey_visible_to_0_predators_mean": 0.23,
+          "prey_visible_to_1_predators_mean": 0.055,
+          "prey_visible_to_2_predators_mean": 0.215,
+          "prey_visible_to_3_predators_mean": 0.5,
+          "return": 0.0,
+          "reward_accounting_max_abs_error": 0.0,
+          "sender_visible_receiver_blind_pairs_mean": 0.54,
+          "sender_visible_receiver_blind_prey_triples_mean": 0.54,
+          "simultaneous_contact_steps": 0.0,
+          "terminated": 0.0,
+          "truncated": 1.0
+        }
+      }
+    },
+    {
+      "frames": 6000,
+      "summaries": {
+        "live": {
+          "any_contact": 0.5,
+          "any_simultaneous_contact": 0.0,
+          "complete": 1.0,
+          "contact_by_deadline": 0.0,
+          "contact_duration_steps": 3.0,
+          "contact_pair_steps": 3.0,
+          "contacting_predators_max": 0.5,
+          "contacting_predators_mean": 0.03,
+          "episode_steps": 100.0,
+          "first_contact_observed": 0.5,
+          "first_contact_step_or_horizon": 87.0,
+          "mean_predator_nearest_prey_distance": 0.5815386159718037,
+          "nearest_predator_prey_distance_mean": 0.4027745935693383,
+          "nearest_predator_prey_distance_min": 0.3398919776082039,
+          "predator_boundary_fraction": 0.335000009983778,
+          "predator_obstacle_collision_pair_steps": 8.0,
+          "predator_teammate_collision_pair_steps": 1.5,
+          "prey_boundary_fraction": 0.41,
+          "prey_visible_to_0_predators_mean": 0.0,
+          "prey_visible_to_1_predators_mean": 0.0,
+          "prey_visible_to_2_predators_mean": 0.325,
+          "prey_visible_to_3_predators_mean": 0.675,
+          "return": 30.0,
+          "reward_accounting_max_abs_error": 0.0,
+          "sender_visible_receiver_blind_pairs_mean": 0.65,
+          "sender_visible_receiver_blind_prey_triples_mean": 0.65,
+          "simultaneous_contact_steps": 0.0,
+          "terminated": 0.0,
+          "truncated": 1.0
+        },
+        "severed": {
+          "any_contact": 0.5,
+          "any_simultaneous_contact": 0.0,
+          "complete": 1.0,
+          "contact_by_deadline": 0.0,
+          "contact_duration_steps": 3.0,
+          "contact_pair_steps": 3.0,
+          "contacting_predators_max": 0.5,
+          "contacting_predators_mean": 0.03,
+          "episode_steps": 100.0,
+          "first_contact_observed": 0.5,
+          "first_contact_step_or_horizon": 87.0,
+          "mean_predator_nearest_prey_distance": 0.5815386159718037,
+          "nearest_predator_prey_distance_mean": 0.4027745935693383,
+          "nearest_predator_prey_distance_min": 0.3398919776082039,
+          "predator_boundary_fraction": 0.335000009983778,
+          "predator_obstacle_collision_pair_steps": 8.0,
+          "predator_teammate_collision_pair_steps": 1.5,
+          "prey_boundary_fraction": 0.41,
+          "prey_visible_to_0_predators_mean": 0.0,
+          "prey_visible_to_1_predators_mean": 0.0,
+          "prey_visible_to_2_predators_mean": 0.325,
+          "prey_visible_to_3_predators_mean": 0.675,
+          "return": 30.0,
+          "reward_accounting_max_abs_error": 0.0,
+          "sender_visible_receiver_blind_pairs_mean": 0.65,
+          "sender_visible_receiver_blind_prey_triples_mean": 0.65,
+          "simultaneous_contact_steps": 0.0,
+          "terminated": 0.0,
+          "truncated": 1.0
+        }
+      }
+    }
+  ]
+}

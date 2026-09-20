@@ -123,11 +123,14 @@ def atomic_write_text(path: Path, text: str) -> None:
     os.replace(temporary, path)
 
 
-def atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
-    atomic_write_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
+def atomic_write_json(path: str | Path, value: Mapping[str, Any]) -> None:
+    atomic_write_text(
+        Path(path), json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
 
 
-def read_json(path: Path, default: Any = None) -> Any:
+def read_json(path: str | Path, default: Any = None) -> Any:
+    path = Path(path)
     if not path.exists():
         return default
     with path.open(encoding="utf-8") as file:

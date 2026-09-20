@@ -471,6 +471,16 @@ def test_analyze_step_covers_every_cluster_pcp_suite(config_root):
     suites = set()
     for path in (config_root / "sweeps").glob("pcp_*.yaml"):
         suite = OmegaConf.load(path)
+        if suite.get("suite") == "configs/experiments/pcp_mapdn_mechanisms_v1.yaml":
+            # The new strict suite descriptor belongs to its own launcher;
+            # adding it to the historical analyzer would misroute its artifacts.
+            assert set(suite) == {"schema_version", "suite", "include", "note"}
+            assert suite.schema_version == 1
+            assert list(suite.include) == []
+            worker = SLURM / "communication_comparison_v1" / "09_analyze.sbatch"
+            assert "scripts/communication_suite.py" in worker.read_text()
+            assert "pcp_mapdn_mechanisms_v1" not in analyze
+            continue
         if suite.get("protocol"):
             protocol = load_protocol(config_root.parent / suite.protocol)
             if protocol["runtime"]["device"] == "cpu":

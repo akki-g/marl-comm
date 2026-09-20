@@ -604,6 +604,10 @@ def validate_protocol_launch(
     check_runtime: bool = True,
 ) -> dict[str, Any]:
     """Validate a manifest's immutable protocol binding before managed training."""
+    if binding.get("kind") == "communication_mechanisms_v1":
+        from commstudy.experiments.mechanism_suite import validate_launch
+
+        return validate_launch(spec, binding, repo_root=repo_root)
     required = {
         "path",
         "sha256",

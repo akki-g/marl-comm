@@ -62,6 +62,7 @@ class GraphComm(CommModule):
         store_debug_attention: bool = False,
         num_roles: int = 2,
         role_aware: bool = False,
+        fixed_mask: list[list[bool]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(hidden_dim=hidden_dim, **kwargs)
@@ -105,6 +106,18 @@ class GraphComm(CommModule):
             torch.empty(num_heads, key_dim // num_heads)
         )
         self.channel = build_channel(channel)
+        # Optional suite topology is an immutable restriction, including when
+        # an adapter supplies an all-ones runtime mask. Existing fallbacks and
+        # their runtime precedence are unchanged when fixed_mask is absent.
+        fixed = None if fixed_mask is None else torch.tensor(fixed_mask, dtype=torch.bool)
+        if fixed is not None and (
+            fixed.ndim != 2 or fixed.shape[0] != fixed.shape[1]
+            or fixed.shape[0] < 2 or fixed.diagonal().any()
+        ):
+            raise ValueError("fixed_mask must be a square, self-free agent mask")
+        # Config metadata, not learned state. Keep native actor parameter keys
+        # unchanged; strict reconstruction binds the mask through the spec.
+        self.fixed_mask = fixed
 
         self._reset_parameters()
         self._debug_attention: torch.Tensor | None = None
@@ -325,6 +338,13 @@ class GraphComm(CommModule):
         validate_comm_input(h, self.hidden_dim, self.__class__.__name__)
 
         context_mask = context.mask if context is not None else None
+        if self.fixed_mask is not None:
+            if self.fixed_mask.shape != (h.shape[-2], h.shape[-2]):
+                raise ValueError("fixed_mask agent count differs from actor input")
+            fixed = self.fixed_mask.to(device=h.device)
+            context_mask = fixed if context_mask is None else (
+                context_mask.to(device=h.device, dtype=torch.bool) & fixed
+            )
         fallback_mask = None if context_mask is not None else self._fallback_topology(h.shape[-2])
         base_edge_mask = resolve_comm_mask(
             h,
