@@ -20,8 +20,8 @@ on a compute node, so `uv` does not need to be available in your login shell.
 
 MAPDN requires your local `case33_3min_final` directory containing `model.p`,
 `pv_active.csv`, `load_active.csv`, and `load_reactive.csv`. The starting config
-points to `../MAPDN/mapdn/environments/var_voltage_control/data/case33_3min_final`
-from the repository root. Keep that dataset layout on the cluster or change
+points to `../MAPDN/mapdn/environments/data/case33_3min_final`
+from the repository root, matching the Newton dataset layout. For another layout, change
 `data_path` in `configs/mapdn.yaml`. Paths inside YAML are relative to the config's directory.
 The runner validates all inputs and prepares a chronological 60/20/20 split and
 training-only normalization from 16 fixed zero-action episodes automatically.

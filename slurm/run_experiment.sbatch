@@ -7,7 +7,8 @@
 #SBATCH --cpus-per-task=5
 #SBATCH --mem=24G
 #SBATCH --time=48:00:00
-#SBATCH --output=slurm-%A_%a.out
+#SBATCH --output=logs/slurm-%A_%a.out
+#SBATCH --error=logs/slurm-%A_%a.err
 # Module/Conda initialization may refer to unset shell variables.
 set -eo pipefail
 : "${SLURM_JOB_ID:?Submit this script with sbatch on Newton}"

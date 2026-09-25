@@ -19,7 +19,7 @@ algorithm_params:
   use_tanh_normal: true
   minibatch_advantage: false
 task_params:
-  data_path: ../../MAPDN/mapdn/environments/var_voltage_control/data/case33_3min_final
+  data_path: ../../MAPDN/mapdn/environments/data/case33_3min_final
   max_steps: 239
   history: 1
   measurement_noise: false
