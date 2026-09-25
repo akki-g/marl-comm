@@ -1,0 +1,86 @@
+[
+  {
+    "task": "PCP",
+    "metric": "evaluation/return_mean",
+    "folder": "figures/pcp/evaluation__return_mean",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "collection/return_mean",
+    "folder": "figures/pcp/collection__return_mean",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "evaluation_domain/adversary/any_contact",
+    "folder": "figures/pcp/evaluation_domain__any_contact",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "evaluation_domain/adversary/contact_duration_steps",
+    "folder": "figures/pcp/evaluation_domain__contact_duration_steps",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "evaluation_domain/adversary/simultaneous_contact_steps",
+    "folder": "figures/pcp/evaluation_domain__simultaneous_contact_steps",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "evaluation_domain/adversary/first_contact_step_or_horizon",
+    "folder": "figures/pcp/evaluation_domain__first_contact_step_or_horizon",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "evaluation_domain/adversary/sender_visible_receiver_blind_pairs_mean",
+    "folder": "figures/pcp/evaluation_domain__sender_visible_receiver_blind_pairs_mean",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "evaluation/adversary/comm_contribution_to_encoder_norm_ratio",
+    "folder": "figures/pcp/evaluation__comm_contribution_to_encoder_norm_ratio",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "training/adversary/entropy",
+    "folder": "figures/pcp/training__entropy",
+    "figures": 6
+  },
+  {
+    "task": "PCP",
+    "metric": "training/adversary/explained_variance",
+    "folder": "figures/pcp/training__explained_variance",
+    "figures": 6
+  },
+  {
+    "task": "MAPDN",
+    "metric": "evaluation/return_mean",
+    "folder": "figures/mapdn/evaluation__return_mean",
+    "figures": 6
+  },
+  {
+    "task": "MAPDN",
+    "metric": "evaluation_domain/agents/mapdn/voltage_violation_magnitude",
+    "folder": "figures/mapdn/evaluation_domain__mapdn__voltage_violation_magnitude",
+    "figures": 6
+  },
+  {
+    "task": "MAPDN",
+    "metric": "evaluation_domain/agents/mapdn/percentage_of_v_out_of_control",
+    "folder": "figures/mapdn/evaluation_domain__mapdn__percentage_of_v_out_of_control",
+    "figures": 6
+  },
+  {
+    "task": "MAPDN",
+    "metric": "evaluation_domain/agents/mapdn/q_loss",
+    "folder": "figures/mapdn/evaluation_domain__mapdn__q_loss",
+    "figures": 6
+  }
+]

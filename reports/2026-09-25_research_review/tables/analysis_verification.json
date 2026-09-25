@@ -1,0 +1,40 @@
+{
+  "unchanged_core_files_verified": 627,
+  "unchanged_input_artifacts_rechecked": 97,
+  "input_manifest_total_files": 186,
+  "completed_policy_checks": {
+    "pcp": 25,
+    "mapdn": 15,
+    "metrics_checksums_match": true,
+    "checkpoint_checksums_match": true,
+    "terminal_csv_out_returns_agree": true,
+    "absolute_return_tolerance": 1e-12
+  },
+  "available_metric_files": 45,
+  "nonfinite_rows": 0,
+  "duplicate_metric_keys": 0,
+  "pcp_final_mean_returns": {
+    "identity": 184.265625,
+    "broadcast": 359.75,
+    "gated": 177.734375,
+    "attention": 163.28125,
+    "graph": 183.515625
+  },
+  "endpoint_seed_means_and_sample_sd_verified": true,
+  "plot_metric_groups": 14,
+  "six_figures_per_metric_verified": true,
+  "aggregate_plot_csvs_recomputed": true,
+  "mapdn_partial_seeds_excluded_from_aggregates": true,
+  "png_count": 91,
+  "plot_pdf_count": 21,
+  "pcp_final_episode_reward_identity_verified": 3200,
+  "new_training_or_intervention_experiments_run": false,
+  "analysis_scope": "Retrospective descriptive analysis of copied local artifacts; no claim about live scheduler state.",
+  "source_revision": "fee0e6b7644c0063536e9bc8828683608678b5e2",
+  "core_code_changed": false,
+  "raw_artifacts_rewritten": false,
+  "local_document_links_verified": true,
+  "report_pdf_pages": 28,
+  "report_figures_and_captions_share_pages": true,
+  "all_23_references_present_in_pdf": true
+}

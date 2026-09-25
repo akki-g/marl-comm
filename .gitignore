@@ -45,3 +45,6 @@ mappo_*_ensemblemodel__*/
 /docs/PCP_CONFIRMATION_CPU_V3_RESULTS.md
 /docs/RESULTS_v2_simple_spread.md
 /docs/PCP_CONFIRMATION_CPU_V2_RESULTS.md
+
+*.tar.gz
+/old_logs/
