@@ -1,2 +1,0 @@
-ERROR: virtualenv not found at /lustre/fs1/home/ak565492/marl-comm/.venv-newton
-Create it once on a login node with slurm/bootstrap_newton.sh

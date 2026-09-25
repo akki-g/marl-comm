@@ -1,0 +1,68 @@
+algorithm: mappo
+task: pcp
+seeds:
+- 1100
+- 1101
+- 1102
+- 1103
+- 1104
+frames: 600000
+output_dir: ../logs/pcp
+algorithm_params:
+  share_param_critic: true
+  clip_epsilon: 0.2
+  entropy_coef: 0.1
+  critic_coef: 1.0
+  loss_critic_type: l2
+  lmbda: 0.9
+  scale_mapping: biased_softplus_1.0
+  use_tanh_normal: true
+  minibatch_advantage: false
+task_params:
+  max_steps: 100
+  num_good_agents: 1
+  num_adversaries: 3
+  num_landmarks: 2
+  shape_agent_rew: false
+  shape_adversary_rew: false
+  agents_share_rew: false
+  adversaries_share_rew: true
+  observe_same_team: true
+  observe_pos: true
+  observe_vel: true
+  bound: 1.0
+  respawn_at_catch: false
+  prey_detection_radius: 0.8
+  prey_obstacle_margin: 0.4
+  prey_boundary_margin: 0.3
+  prey_wander_force: 0.15
+  prey_noise_std: 0.05
+  prey_min_flee_frac: 0.3
+  predator_sensing_radius: 1.0
+model:
+  hidden_dim: 128
+  num_encoder_layers: 2
+  critic_hidden_sizes:
+  - 128
+  - 128
+  message_dim: 32
+  key_dim: 32
+  num_heads: 4
+  rounds: 1
+training:
+  gamma: 0.95
+  lr: 5.0e-05
+  adam_eps: 1.0e-06
+  clip_grad_val: 5
+  batch_frames: 6000
+  num_envs: 10
+  epochs: 10
+  minibatch_size: 400
+evaluation:
+  interval: 12000
+  episodes: 128
+  deterministic: true
+  static: false
+execution:
+  workers: 5
+  device: cpu

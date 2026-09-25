@@ -17,12 +17,20 @@ from benchmarl.models import MlpConfig
 
 from commstudy.communication.base import CommModule
 from commstudy.communication.channel import (
-    DropoutChannel, GaussianNoiseChannel, IdentityChannel, QuantizedChannel,
+    DropoutChannel,
+    GaussianNoiseChannel,
+    IdentityChannel,
+    QuantizedChannel,
 )
 from commstudy.models import CommPolicyConfig
 from commstudy.utils.imports import import_from_path
 from commstudy.utils.validation import (
-    dataclass_values, finite_tree, known_keys, mapping, number, typed,
+    dataclass_values,
+    finite_tree,
+    known_keys,
+    mapping,
+    number,
+    typed,
 )
 
 
@@ -45,7 +53,8 @@ def _constructor_values(cls, values, path, *, base=None):
         if annotation is not None:
             typed(value, annotation, f"{path}.{key}")
     result = {
-        key: default for key, (default, _) in options.items()
+        key: default
+        for key, (default, _) in options.items()
         if default is not inspect.Parameter.empty
     }
     result.update(values)
@@ -71,9 +80,12 @@ def validated_channel(config, path="channel"):
             raise ValueError(f"{path}.channels must be a nonempty sequence.")
         return validated_channel(children, path)
     classes = {
-        "identity": IdentityChannel, "dropout": DropoutChannel,
-        "gaussian": GaussianNoiseChannel, "gaussian_noise": GaussianNoiseChannel,
-        "quantized": QuantizedChannel, "quantization": QuantizedChannel,
+        "identity": IdentityChannel,
+        "dropout": DropoutChannel,
+        "gaussian": GaussianNoiseChannel,
+        "gaussian_noise": GaussianNoiseChannel,
+        "quantized": QuantizedChannel,
+        "quantization": QuantizedChannel,
     }
     if kind not in classes:
         raise ValueError(f"{path}: unknown channel type {kind!r}.")
@@ -103,8 +115,9 @@ def _communication_params(params, path):
         raise ValueError(f"{path}.actor_observation_keys must not be empty.")
     for key in actor_keys:
         if not (isinstance(key, str) and key) and not (
-            isinstance(key, (list, tuple)) and key and
-            all(isinstance(part, str) and part for part in key)
+            isinstance(key, (list, tuple))
+            and key
+            and all(isinstance(part, str) and part for part in key)
         ):
             raise ValueError(f"{path}.actor_observation_keys contains an invalid key.")
     context = values["comm_context_keys"]
@@ -159,10 +172,12 @@ def validated_model_config(config, path="model_config"):
             raise ValueError(f"{path}.groups must not be empty.")
         if any("groups" in mapping(value, path) for value in groups.values()):
             raise ValueError(f"{path}: nested grouped models are not supported.")
-        return {"groups": {
-            group: validated_model_config(value, f"{path}.groups.{group}")
-            for group, value in groups.items()
-        }}
+        return {
+            "groups": {
+                group: validated_model_config(value, f"{path}.groups.{group}")
+                for group, value in groups.items()
+            }
+        }
     known_keys(config, {"model_type", "params"}, path)
     kind = config.get("model_type")
     params = mapping(config.get("params", {}), f"{path}.params")
@@ -179,8 +194,11 @@ def validated_model_config(config, path="model_config"):
             cls = values.pop(key)
             values[f"{key}_path"] = None if cls is None else f"{cls.__module__}.{cls.__name__}"
         # Preserve the runner's documented class defaults rather than upstream's activation.
-        values.update(layer_class_path="torch.nn.Linear", activation_class_path="torch.nn.Tanh",
-                      norm_class_path=None)
+        values.update(
+            layer_class_path="torch.nn.Linear",
+            activation_class_path="torch.nn.Tanh",
+            norm_class_path=None,
+        )
         values.update(params)
         hints = get_type_hints(MlpConfig)
         for key, value in params.items():
@@ -206,8 +224,14 @@ def validate_experiment_values(values):
     for key, value in values.items():
         if value is None:
             continue
-        if key in {"gamma", "polyak_tau", "exploration_eps_init", "exploration_eps_end",
-                   "off_policy_prb_alpha", "off_policy_prb_beta"}:
+        if key in {
+            "gamma",
+            "polyak_tau",
+            "exploration_eps_init",
+            "exploration_eps_end",
+            "off_policy_prb_alpha",
+            "off_policy_prb_beta",
+        }:
             number(value, f"experiment.{key}", maximum=1)
         elif key in {"lr", "adam_eps", "clip_grad_val"}:
             number(value, f"experiment.{key}", strict=True)
@@ -227,8 +251,9 @@ def validate_spec_documents(spec):
         typed(getattr(spec, key), str, key)
     known_keys(spec.algorithm_config, {"params"}, "algorithm_config")
     known_keys(spec.task_config, {"params", "return_groups"}, "task_config")
-    resolve_algorithm(spec.algorithm, mapping(spec.algorithm_config.get("params", {}),
-                                            "algorithm_config.params"))
+    resolve_algorithm(
+        spec.algorithm, mapping(spec.algorithm_config.get("params", {}), "algorithm_config.params")
+    )
     resolve_task(spec.task, mapping(spec.task_config.get("params", {}), "task_config.params"))
     groups = {"adversary", "agent"} if spec.task == "vmas_predator_capture_prey" else {"agents"}
     returns = spec.task_config.get("return_groups")

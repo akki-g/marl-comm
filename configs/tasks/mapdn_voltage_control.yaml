@@ -1,9 +1,0 @@
-params:
-  data_path: data/case33_3min_final
-  manifest_path: data/mapdn_case33_manifest.json
-  normalization_path: null
-  max_steps: 239
-  history: 1
-  split: train
-  evaluation_split: validation
-return_groups: [agents]

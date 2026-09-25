@@ -47,8 +47,12 @@ class EvaluationIsolatedExperiment(Experiment):
     def _collection_loop(self):
         # The upstream loop retains complete ownership of collection and PPO.
         # Nested optimizer/evaluation contexts override this collection default.
-        with channel_phase("collection"):
-            return super()._collection_loop()
+        self._training_active = True
+        try:
+            with channel_phase("collection"):
+                return super()._collection_loop()
+        finally:
+            self._training_active = False
 
     def _optimizer_loop(self, group):
         with channel_phase("optimization"):
@@ -56,10 +60,28 @@ class EvaluationIsolatedExperiment(Experiment):
 
     def _evaluation_loop(self):
         with self._evaluation_context():
-            return super()._evaluation_loop()
+            result = super()._evaluation_loop()
+            self._last_evaluated_frames = self.total_frames
+            return result
 
     def evaluate(self):
         # Public evaluate() seeds before calling _evaluation_loop; protect that
         # outer seed as well as callbacks/logging and the actual rollout.
         with preserve_rng_state():
             return super().evaluate()
+
+    def close(self):
+        if getattr(self, "_closed", False):
+            return
+        # The upstream loop closes the environment itself. Evaluate the final
+        # policy before that close if the budget ends between scheduled checks.
+        if (
+            getattr(self, "_training_active", False)
+            and self.config.evaluation
+            and self.total_frames == self.config.get_max_n_frames(self.on_policy)
+            and getattr(self, "_last_evaluated_frames", None) != self.total_frames
+        ):
+            self._evaluation_loop()
+            self.logger.commit()
+        super().close()
+        self._closed = True

@@ -26,3 +26,21 @@ outputs/
 # accident. They are scratch, never evidence -- real run output goes to runs/.
 mappo_*_ensemblemodel__*/
 *_ensemblemodel__*/
+
+# Current experiment outputs and local datasets
+/logs/
+/data/
+/build/
+/dist/
+/slurm-*.out
+.DS_Store
+/notebooks/
+
+# Preserved local historical research documents; see docs/HISTORY.md
+/docs/MAPDN_CONFIRMATION_ANALYSIS.md
+/docs/RESULTS_pcp_pilot.md
+/docs/experiments/
+/docs/MAPDN_CONFIRMATION_RESULTS.md
+/docs/PCP_CONFIRMATION_CPU_V3_RESULTS.md
+/docs/RESULTS_v2_simple_spread.md
+/docs/PCP_CONFIRMATION_CPU_V2_RESULTS.md

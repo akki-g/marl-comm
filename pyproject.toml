@@ -4,91 +4,46 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "commstudy"
-version = "0.1.0"
-description = "Learned communication experiments for cooperative multi-agent reinforcement learning"
-requires-python = ">=3.11"
-
-# This file is the single source of truth for dependencies.
-# `req.txt` is kept only as a pointer to this file so that the two
-# cannot drift apart again.
-#
-# Version constraints are chosen to stay inside the window that
-# BenchMARL 1.5.2 supports:
-#   benchmarl 1.5.2 -> torchrl >=0.10,<0.12
-#   torchrl   0.11.x -> tensordict >=0.11,<0.12
+version = "0.2.0"
+description = "Reproducible PCP and MAPDN communication comparisons"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "benchmarl[vmas]==1.5.2",
-    "torchrl>=0.11,<0.12",
-    "tensordict>=0.11,<0.12",
-    "torch>=2.7",
-    "vmas>=1.5",
-    "numpy>=2.0",
-    # Imported directly by commstudy.experiments.config, so it is an
-    # explicit dependency rather than a transitive BenchMARL one.
+    "torch==2.13.0",
+    "torchrl==0.11.1",
+    "tensordict==0.11.0",
+    "vmas==1.5.2",
+    "numpy==2.2.6",
     "omegaconf>=2.3",
-    "hydra-core>=1.3",
+    "pandas==2.3.3",
+    "pandapower==3.3.0",
+    "gymnasium==1.3.0",
+    "pettingzoo==1.27.0",
+    "matplotlib==3.11.1",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.3",
-    "pytest-cov>=6.0",
-    "pytest-xdist>=3.6",
-    "ruff>=0.9",
-    "mypy>=1.14",
-    "setuptools>=75",
-    "wheel>=0.45",
-    "build>=1.2",
-]
-# MAPDN is not on PyPI, so it needs a direct reference rather than a bare name:
-# `[tool.uv.sources]` is a uv-only mechanism and the Newton setup installs with
-# pip (slurm/01_setup.sbatch), which ignores it and would fail resolving `mapdn`.
-# Kept out of the core dependencies so a PCP run is never blocked on fetching a
-# power-grids dependency it does not import; install with
-# `uv sync --extra powergrid` or `pip install -e '.[powergrid]'`.
-powergrid = [
-    "mapdn @ git+https://github.com/akki-g/MAPDN.git",
-]
-logging = [
-    "tensorboard>=2.18",
-    "wandb>=0.19",
-]
-analysis = [
-    "scipy>=1.14",
-    "pandas>=2.2",
-    "matplotlib>=3.9",
-]
-envs = [
-    "pettingzoo>=1.24",
-    "gymnasium>=1.0",
-    "pygame>=2.6",
-]
-gnn = [
-    "torch-geometric>=2.6",
-    "networkx>=3.4",
-]
-render = [
-    "imageio>=2.36",
-    "imageio-ffmpeg>=0.5",
-    "moviepy<2.0",
-    "av<14",
-]
+dev = ["pytest>=8.3", "ruff>=0.9", "build>=1.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["commstudy*"]
 
+[tool.setuptools.package-data]
+"commstudy.environments.mapdn" = ["LICENSE", "ORIGIN.json"]
+
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["src/tests"]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "scripts"]
+src = ["src", "scripts", "tests"]
 
 [tool.ruff.lint]
-# "I" (import sorting) is intentionally left out: the existing modules group
-# BenchMARL imports separately from torch/tensordict on purpose. Run
-# `ruff check --select I --fix` if that convention is ever dropped.
 select = ["E", "F", "UP", "B"]
+# Preserve upstream MAPDN style during the move; physics is checked by integration tests.
+[tool.ruff.lint.per-file-ignores]
+"src/commstudy/environments/mapdn/**/*.py" = ["E", "UP", "B"]
+"src/commstudy/adapters/mapdn_parallel.py" = ["E501"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -15,8 +16,9 @@ from tensordict import TensorDict
 from commstudy.communication.base import CommModule
 from commstudy.experiments.bookkeeping import parameter_counts
 from commstudy.experiments.health import TrainingHealthCallback
-from commstudy.experiments.returns import (
+from commstudy.tasks.returns import (
     group_collection_returns,
+    collection_episode_returns,
     group_rollout_returns,
     mean_over_groups,
     resolve_return_groups,
@@ -64,15 +66,18 @@ def tensor_health_metrics(value: torch.Tensor, prefix: str) -> dict[str, float]:
     values = values[finite]
     if values.numel():
         quantiles = torch.quantile(values, values.new_tensor([0.01, 0.5, 0.99]))
-        metrics.update({
-            f"{prefix}_mean": float(values.mean().cpu()),
-            f"{prefix}_std": float(values.std(correction=0).cpu()),
-            f"{prefix}_min": float(values.min().cpu()),
-            f"{prefix}_max": float(values.max().cpu()),
-            **{f"{prefix}_{name}": float(v.cpu()) for name, v in zip(
-                ("q01", "q50", "q99"), quantiles, strict=True
-            )},
-        })
+        metrics.update(
+            {
+                f"{prefix}_mean": float(values.mean().cpu()),
+                f"{prefix}_std": float(values.std(correction=0).cpu()),
+                f"{prefix}_min": float(values.min().cpu()),
+                f"{prefix}_max": float(values.max().cpu()),
+                **{
+                    f"{prefix}_{name}": float(v.cpu())
+                    for name, v in zip(("q01", "q50", "q99"), quantiles, strict=True)
+                },
+            }
+        )
     return metrics
 
 
@@ -100,15 +105,17 @@ class CommunicationHealthObserver:
 
     def __init__(self, module: CommModule, checking_replay: Callable[[], bool]):
         self.module = module
-        self.checking_replay = lambda: checking_replay() or getattr(
-            module, "_health_replay_check", False
+        self.checking_replay = lambda: (
+            checking_replay() or getattr(module, "_health_replay_check", False)
         )
         self.sums: dict[str, float] = {}
         self.counts: dict[str, int] = {}
         self.transitions = 0
         self.agent_transitions = 0
-        self.handles = [module.register_forward_pre_hook(self._before),
-                        module.register_forward_hook(self._after)]
+        self.handles = [
+            module.register_forward_pre_hook(self._before),
+            module.register_forward_hook(self._after),
+        ]
         gate = getattr(module, "gate_network", None)
         if isinstance(gate, torch.nn.Module):
             self.handles.append(gate.register_forward_hook(self._gate))
@@ -148,8 +155,9 @@ class CommunicationHealthObserver:
         self._add("gate_saturated_high_fraction", (gate > 0.99).float())
 
     def drain(self) -> dict[str, float]:
-        result = {key: value / self.counts[key] for key, value in self.sums.items()
-                  if self.counts[key]}
+        result = {
+            key: value / self.counts[key] for key, value in self.sums.items() if self.counts[key]
+        }
         result["transition_count"] = float(self.transitions)
         result["agent_transition_count"] = float(self.agent_transitions)
         for name in ("contribution_to_encoder_norm_ratio", "gate_saturated_low_fraction"):
@@ -166,6 +174,7 @@ class TidyMetricsWriter:
 
     def __init__(self, run_dir: str | Path) -> None:
         self.path = Path(run_dir) / "metrics.csv"
+        self.on_record = None
 
     def _ensure_header(self) -> None:
         if self.path.exists():
@@ -186,24 +195,31 @@ class TidyMetricsWriter:
     ) -> None:
         self._ensure_header()
         timestamp = _timestamp()
-        with self.path.open("a", encoding="utf-8", newline="") as file:
+        with (
+            self.path.open("a", encoding="utf-8", newline="") as file,
+            self.path.with_name("run.out").open("a", encoding="utf-8") as out,
+        ):
             writer = csv.DictWriter(file, fieldnames=METRIC_COLUMNS)
             for metric, raw_value in metrics.items():
                 value = _scalar(raw_value)
                 if value is None:
                     continue
-                writer.writerow(
-                    {
-                        "timestamp": timestamp,
-                        "frames": int(frames),
-                        "iteration": int(iteration),
-                        "phase": phase,
-                        "group": group,
-                        "metric": metric,
-                        "value": repr(value),
-                        "sample": "" if sample is None else sample,
-                    }
-                )
+                if not math.isfinite(value):
+                    raise ValueError(f"Nonfinite metric {phase}/{group}/{metric}: {value}")
+                record = {
+                    "timestamp": timestamp,
+                    "frames": int(frames),
+                    "iteration": int(iteration),
+                    "phase": phase,
+                    "group": group,
+                    "metric": metric,
+                    "value": repr(value),
+                    "sample": "" if sample is None else sample,
+                }
+                writer.writerow(record)
+                out.write("METRIC " + json.dumps(record, sort_keys=True) + "\n")
+                if self.on_record is not None:
+                    self.on_record(record)
             file.flush()
 
 
@@ -213,12 +229,10 @@ class ExperimentMetricsCallback(Callback):
     def __init__(
         self,
         run_dir: str | Path,
-        heartbeat: Callable[[], None] | None = None,
         return_groups: Sequence[str] | None = None,
     ) -> None:
         super().__init__()
         self.writer = TidyMetricsWriter(run_dir)
-        self._heartbeat = heartbeat
         self._wall_start: float | None = None
         # Which groups' reward is the study's return. None means every group,
         # which is what a single-group task resolves to anyway.
@@ -262,9 +276,7 @@ class ExperimentMetricsCallback(Callback):
             if callable(reset):
                 reset()
         return {
-            f"comm_{key}": sum(values) / len(values)
-            for key, values in collected.items()
-            if values
+            f"comm_{key}": sum(values) / len(values) for key, values in collected.items() if values
         }
 
     def _forward_to_benchmarl(self, metrics: Mapping[str, float], prefix: str) -> None:
@@ -309,8 +321,6 @@ class ExperimentMetricsCallback(Callback):
         self._drain_comm_stats()
 
     def on_batch_collected(self, batch) -> None:
-        if self._heartbeat is not None:
-            self._heartbeat()
         # Not experiment.mean_return: BenchMARL averages over every group, which
         # on a two-group zero-sum task such as PCP is identically zero. This is
         # the same per-group figure BenchMARL logs, restricted to the groups the
@@ -331,15 +341,24 @@ class ExperimentMetricsCallback(Callback):
             metrics=metrics,
         )
         self._write_group_returns("collection", per_group)
+        for index, value in enumerate(collection_episode_returns(batch, self._return_groups)):
+            self.writer.write(
+                frames=self.experiment.total_frames,
+                iteration=self.experiment.n_iters_performed,
+                phase="collection",
+                metrics={"return_episode": value},
+                sample=index,
+            )
         if self._mapdn_domain:
             self.writer.write(
                 frames=self.experiment.total_frames,
                 iteration=self.experiment.n_iters_performed,
-                phase="collection_domain", group="agents",
+                phase="collection_domain",
+                group="agents",
                 metrics=self.experiment.task.log_info(batch),
             )
         if self._pcp_domain:
-            from commstudy.analysis.pcp_domain import domain_transition_series
+            from commstudy.tasks.pcp_statistics import domain_transition_series
 
             domain = domain_transition_series(batch)
             self.writer.write(
@@ -348,12 +367,13 @@ class ExperimentMetricsCallback(Callback):
                 phase="collection_domain",
                 group="adversary",
                 metrics={
-                    **{name + "_mean": float(value.mean().cpu())
-                       for name, value in domain.items()},
+                    **{name + "_mean": float(value.mean().cpu()) for name, value in domain.items()},
                     "transition_count": float(batch.numel()),
                     "reward_accounting_max_abs_error": float(
                         (domain["predator_reward"] - domain["expected_predator_reward"])
-                        .abs().max().cpu()
+                        .abs()
+                        .max()
+                        .cpu()
                     ),
                 },
             )
@@ -367,9 +387,13 @@ class ExperimentMetricsCallback(Callback):
         for key in ("value_target", "advantage", "state_value"):
             value = batch.get((group, key), None)
             if isinstance(value, torch.Tensor):
-                comm_stats.update({name: scalar for name, scalar in
-                                   tensor_health_metrics(value, key).items()
-                                   if not name.endswith(("_q01", "_q50", "_q99"))})
+                comm_stats.update(
+                    {
+                        name: scalar
+                        for name, scalar in tensor_health_metrics(value, key).items()
+                        if not name.endswith(("_q01", "_q50", "_q99"))
+                    }
+                )
         device = torch.device(self.experiment.config.train_device)
         return TensorDict(
             {key: torch.tensor(value, device=device) for key, value in comm_stats.items()},
@@ -395,9 +419,13 @@ class ExperimentMetricsCallback(Callback):
                 if name.removeprefix("comm_") in CommModule._MAX_REDUCED_STATS:
                     metrics[name] = float(value.max().cpu())
                     continue
-                count_key = (f"{name}_count" if name.endswith("norm_ratio") else
-                             "comm_gate_saturated_low_fraction_count"
-                             if "gate_saturated_" in name else "comm_transition_count")
+                count_key = (
+                    f"{name}_count"
+                    if name.endswith("norm_ratio")
+                    else "comm_gate_saturated_low_fraction_count"
+                    if "gate_saturated_" in name
+                    else "comm_transition_count"
+                )
                 weights = training_td.get(count_key, None)
                 if isinstance(weights, torch.Tensor) and bool(weights.sum() > 0):
                     metrics[name] = float((value * weights).sum().cpu() / weights.sum().cpu())
@@ -453,11 +481,7 @@ class ExperimentMetricsCallback(Callback):
     def _measured(self, per_group: Mapping[str, float]) -> dict[str, float]:
         """Keep only the groups whose reward the study reports."""
 
-        return {
-            group: value
-            for group, value in per_group.items()
-            if group in self._return_groups
-        }
+        return {group: value for group, value in per_group.items() if group in self._return_groups}
 
     def _write_group_returns(self, phase: str, per_group: Mapping[str, float]) -> None:
         """Record each measured group's own return beside the study figure.
@@ -483,9 +507,7 @@ class ExperimentMetricsCallback(Callback):
         for rollout in rollouts:
             # Restricted to the measured groups: averaging PCP's predators with
             # its scripted prey cancels to exactly zero.
-            group_returns = group_rollout_returns(
-                rollout, tuple(self.experiment.group_map)
-            )
+            group_returns = group_rollout_returns(rollout, tuple(self.experiment.group_map))
             for group, value in group_returns.items():
                 per_group_totals.setdefault(group, []).append(value)
             episode_return = mean_over_groups(self._measured(group_returns))
@@ -499,9 +521,7 @@ class ExperimentMetricsCallback(Callback):
                     "return_mean": sum(episode_returns) / len(episode_returns),
                     "return_min": min(episode_returns),
                     "return_max": max(episode_returns),
-                    "episode_length_mean": sum(
-                        rollout.batch_size[0] for rollout in rollouts
-                    )
+                    "episode_length_mean": sum(rollout.batch_size[0] for rollout in rollouts)
                     / len(rollouts),
                 }
             )
@@ -512,7 +532,8 @@ class ExperimentMetricsCallback(Callback):
         flat_rollouts = [rollout.reshape(-1) for rollout in rollouts]
         per_group_comm = (
             self._write_group_health("evaluation", torch.cat(flat_rollouts, dim=0))
-            if flat_rollouts else {}
+            if flat_rollouts
+            else {}
         )
         comm_stats = self._study_comm_metrics(per_group_comm)
         metrics.update(comm_stats)
@@ -543,19 +564,23 @@ class ExperimentMetricsCallback(Callback):
                 self.writer.write(
                     frames=self.experiment.total_frames,
                     iteration=self.experiment.n_iters_performed,
-                    phase="evaluation_domain_episode", group="agents", sample=index,
+                    phase="evaluation_domain_episode",
+                    group="agents",
+                    sample=index,
                     metrics=self.experiment.task.log_info(rollout),
                 )
             if flat_rollouts:
                 self.writer.write(
                     frames=self.experiment.total_frames,
                     iteration=self.experiment.n_iters_performed,
-                    phase="evaluation_domain", group="agents",
+                    phase="evaluation_domain",
+                    group="agents",
                     metrics=self.experiment.task.log_info(torch.cat(flat_rollouts, dim=0)),
                 )
         if self._pcp_domain:
-            from commstudy.analysis.pcp_domain import (
-                domain_episode_metrics, summarize_domain_episodes,
+            from commstudy.tasks.pcp_statistics import (
+                domain_episode_metrics,
+                summarize_domain_episodes,
             )
 
             domain_episodes = []

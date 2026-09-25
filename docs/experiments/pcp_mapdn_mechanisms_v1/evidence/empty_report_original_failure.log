@@ -1,9 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/scripts/communication_suite.py", line 177, in <module>
-    main()
-  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/scripts/communication_suite.py", line 156, in main
-    analyze(args.run_root)
-  File "/Users/akshatguduru/Desktop/Thesis/marl-comm/src/commstudy/analysis/mechanism_report.py", line 194, in analyze
-    ("supplement_effects", stats["supplement_effects"]),
-                           ~~~~~^^^^^^^^^^^^^^^^^^^^^^
-KeyError: 'supplement_effects'

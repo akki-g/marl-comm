@@ -1,313 +1,462 @@
+"""Run five communication methods from one config, with isolated seed processes."""
+
 from __future__ import annotations
 
-import dataclasses
-from collections.abc import Mapping, Sequence
-from copy import deepcopy
+import argparse
+import csv
+import fcntl
+import hashlib
+import io
+import json
+import os
+import platform
 from pathlib import Path
-from typing import Any
+import signal
+import subprocess
+import sys
+import time
+import traceback
+from contextlib import contextmanager
+from dataclasses import replace
 
-from benchmarl.experiment import (
-    Experiment,
-    ExperimentConfig as BenchMARLExperimentConfig,
+from omegaconf import OmegaConf
+import torch
+
+from commstudy.experiments.bookkeeping import (
+    atomic_write_json,
+    atomic_write_text,
+    capture_git_state,
+    capture_versions,
+    parameter_counts,
+    read_json,
+    task_runtime_contract,
+    utc_now,
 )
-from benchmarl.experiment.callback import Callback
-from benchmarl.models import MlpConfig, EnsembleModelConfig
-from benchmarl.models.common import ModelConfig
+from commstudy.experiments.build import build_experiment
+from commstudy.experiments.config import (
+    METHODS,
+    allocation,
+    config_fingerprint,
+    experiment_spec_from_dict,
+    load_config,
+    make_spec,
+    resolved_experiment_dict,
+)
+from commstudy.experiments.metrics import ExperimentMetricsCallback, METRIC_COLUMNS
+from commstudy.experiments.provenance import source_fingerprint
 
-from commstudy.algorithms import resolve_algorithm
-from commstudy.experiments.bookkeeping import RunContext, RunRecorder
-from commstudy.experiments.config import ExperimentSpec, validate_experiment_spec
-from commstudy.experiments.evaluation import EvaluationIsolatedExperiment
-from commstudy.experiments.metrics import ExperimentMetricsCallback
-from commstudy.experiments.health import TrainingHealthCallback
-from commstudy.experiments.returns import RETURN_GROUPS_KEY
-from commstudy.models import CommPolicyConfig
-from commstudy.tasks import resolve_task
-from commstudy.utils.imports import import_from_path
-
-
-def _build_benchmarl_mlp(
-    params: Mapping[str, Any],
-) -> MlpConfig:
-    """
-    Construct BenchMARL's standard MLP config.
-
-    Our YAML stores classes as import paths so the YAML remains
-    serializable. They are resolved here before constructing the
-    BenchMARL ModelConfig.
-    """
-    values = deepcopy(dict(params))
-
-    layer_class_path = values.pop(
-        "layer_class_path",
-        "torch.nn.Linear",
-    )
-
-    activation_class_path = values.pop(
-        "activation_class_path",
-        "torch.nn.Tanh",
-    )
-
-    norm_class_path = values.pop(
-        "norm_class_path",
-        None,
-    )
-
-    values["layer_class"] = import_from_path(layer_class_path)
-
-    values["activation_class"] = import_from_path(activation_class_path)
-
-    values["norm_class"] = None if norm_class_path is None else import_from_path(norm_class_path)
-
-    return MlpConfig(
-        **values,
-    )
+THREAD_ENV = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+)
 
 
-def build_model_config(
-    config: Mapping[str, Any],
-) -> ModelConfig:
-    """
-    Construct one of the policy model configurations supported by
-    commstudy.
-
-    Currently:
-
-        benchmarl_mlp
-            -> BenchMARL MlpConfig
-
-        communication
-            -> CommPolicyConfig
-    """
-    from commstudy.experiments.schema import validated_model_config
-
-    # Validate before selecting a branch, and use the same explicit defaults
-    # exported into manifests. No module or random parameter is created here.
-    config = validated_model_config(config)
-    if "groups" in config:
-        return EnsembleModelConfig(
-            {
-                group: _build_single_model_config(group_config)
-                for group, group_config in config["groups"].items()
-            }
-        )
-    return _build_single_model_config(config)
+def file_sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
-def _build_single_model_config(
-    config: Mapping[str, Any],
-) -> ModelConfig:
-    model_type = config.get("model_type")
-    params = config.get("params", {})
-
-    if not isinstance(params, Mapping):
-        raise TypeError("Model 'params' must be a mapping.")
-
-    if model_type == "benchmarl_mlp":
-        return _build_benchmarl_mlp(params)
-
-    if model_type == "communication":
-        return CommPolicyConfig(**dict(params))
-
-    raise ValueError(
-        f"Unknown model_type '{model_type}'. Expected 'benchmarl_mlp' or 'communication'."
-    )
+def worker_count(requested):
+    available = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+    allocation_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", available or 1))
+    return min(requested, max(1, min(available or 1, allocation_cpus)))
 
 
-def _build_experiment_config(
-    overrides: Mapping[str, Any],
-) -> BenchMARLExperimentConfig:
-    """
-    Start with BenchMARL's standard ExperimentConfig and apply only
-    the experiment-level values specified by this project.
-    """
-    config = BenchMARLExperimentConfig.get_from_yaml()
-
-    for key, value in overrides.items():
-        if not hasattr(config, key):
-            raise ValueError(f"Unknown BenchMARL experiment configuration field '{key}'.")
-
-        setattr(
-            config,
-            key,
-            value,
-        )
-
-    return config
+@contextmanager
+def experiment_lock(root):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / ".lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError(f"Another launch is using {root}") from error
+        # Workers inherit this descriptor. If the coordinator is killed, its
+        # surviving workers keep the directory locked until they exit.
+        yield lock.fileno()
 
 
-def build_experiment(
-    spec: ExperimentSpec,
-    callbacks: Sequence[Callback] | None = None,
-) -> Experiment:
-    """
-    Assemble a BenchMARL experiment from a commstudy ExperimentSpec.
-
-    Assembly path:
-
-        ExperimentSpec
-            ↓
-        task registry
-            ↓
-        algorithm registry
-            ↓
-        policy model config
-            ↓
-        critic model config
-            ↓
-        BenchMARL Experiment
-    """
-    validate_experiment_spec(spec)
-    algorithm_params = spec.algorithm_config.get(
-        "params",
-        {},
-    )
-
-    task_params = spec.task_config.get(
-        "params",
-        {},
-    )
-
-    algorithm_config = resolve_algorithm(
-        spec.algorithm,
-        algorithm_params,
-    )
-
-    task = resolve_task(
-        spec.task,
-        task_params,
-    )
-
-    model_config = build_model_config(spec.model_config)
-
-    critic_model_config = build_model_config(spec.critic_model)
-
-    experiment_config = _build_experiment_config(spec.experiment)
-
-    # BenchMARL creates only the generated run-name child and deliberately
-    # uses ``parents=False``. Creating this parent here keeps every caller of
-    # the public build path safe, including unmanaged integration tests.
-    if experiment_config.save_folder is not None:
-        Path(experiment_config.save_folder).mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-    configured_callbacks = list(callbacks or ())
-    health_callbacks = [c for c in configured_callbacks if isinstance(c, TrainingHealthCallback)]
-    if len(health_callbacks) > 1:
-        raise ValueError("Only one TrainingHealthCallback may be installed.")
-    effective_callbacks = (health_callbacks or [TrainingHealthCallback()]) + [
-        c for c in configured_callbacks if not isinstance(c, TrainingHealthCallback)
-    ]
-    return EvaluationIsolatedExperiment(
-        task=task,
-        algorithm_config=algorithm_config,
-        model_config=model_config,
-        critic_model_config=critic_model_config,
-        seed=spec.seed,
-        config=experiment_config,
-        callbacks=effective_callbacks,
-    )
+def run_directory(root, method, seed):
+    return Path(root) / method / f"seed_{seed}"
 
 
-def run_experiment(
-    spec: ExperimentSpec,
-    callbacks: Sequence[Callback] | None = None,
-) -> Experiment:
-    """
-    Build and execute an experiment.
-
-    Returning the experiment object is useful for tests and later
-    programmatic analysis of training results.
-    """
-    experiment = build_experiment(
-        spec,
-        callbacks=callbacks,
-    )
-
-    experiment.run()
-
-    return experiment
+def compatible_completion(path, binding):
+    status = read_json(path / "status.json", {})
+    if status.get("state") != "completed":
+        return False
+    if status.get("binding") != binding:
+        raise ValueError(f"Incompatible completed job: {path}")
+    for name in ("metrics.csv", "checkpoint.pt"):
+        if not (path / name).is_file() or file_sha(path / name) != status.get("sha256", {}).get(
+            name
+        ):
+            raise ValueError(f"Completed job has a missing or changed {name}: {path}")
+    if not (path / "run.out").is_file():
+        raise ValueError(f"Completed job is missing run.out: {path}")
+    return True
 
 
-def run_managed_experiment(
-    spec: ExperimentSpec,
-    context: RunContext,
-    *,
-    repo_root: Path,
-    overrides: Sequence[str] = (),
-    callbacks: Sequence[Callback] = (),
-    protocol_binding: Mapping[str, Any] | None = None,
-    expected_contract: Mapping[str, Any] | None = None,
-    validation_run: bool = False,
-) -> Experiment:
-    """Execute one run with durable metadata, status, and tidy metrics."""
-    validate_experiment_spec(spec)
-    launch = None
-    if spec.task == "vmas_predator_capture_prey":
-        from commstudy.experiments.protocols import ProtocolGateError, validate_protocol_launch
+def preserve_attempt(path):
+    path.mkdir(parents=True, exist_ok=True)
+    previous = [p for p in path.iterdir() if p.name != "attempts"]
+    if previous:
+        attempts = path / "attempts"
+        attempts.mkdir(exist_ok=True)
+        target = attempts / f"attempt_{len(list(attempts.iterdir())) + 1:03d}"
+        target.mkdir()
+        for item in previous:
+            item.rename(target / item.name)
 
-        if validation_run:
-            frame_limit = spec.experiment.get("max_n_frames")
-            if type(frame_limit) is not int or not 1 <= frame_limit <= 6000:
-                raise ProtocolGateError(
-                    "Validation runs require an explicit integer max_n_frames in [1, 6000]."
-                )
-        elif protocol_binding is None:
-            raise ProtocolGateError("Managed PCP training requires an approved protocol binding.")
-        elif expected_contract is None:
-            raise ProtocolGateError(
-                "Managed PCP scientific training requires a built model contract."
+
+def combine_results(config):
+    """Only the coordinator writes experiment tables; old attempts never count."""
+    root = Path(config["output_dir"])
+    temporary = root / ".metrics.csv.tmp"
+    runs = io.StringIO(newline="")
+    summary = csv.DictWriter(runs, fieldnames=("method", "seed", "state", "frames", "error"))
+    summary.writeheader()
+    with temporary.open("w", encoding="utf-8", newline="") as metrics:
+        writer = csv.DictWriter(metrics, fieldnames=("method", "seed", *METRIC_COLUMNS))
+        writer.writeheader()
+        for method, seed in allocation(config):
+            path = run_directory(root, method, seed)
+            status = read_json(path / "status.json", {})
+            frames = 0
+            if (path / "metrics.csv").exists():
+                with (path / "metrics.csv").open(newline="") as stream:
+                    for row in csv.DictReader(stream):
+                        if set(row) != set(METRIC_COLUMNS) or None in row.values():
+                            continue  # a process may have been killed during its last write
+                        frames = max(frames, int(row["frames"]))
+                        writer.writerow({"method": method, "seed": seed, **row})
+            summary.writerow(
+                {
+                    "method": method,
+                    "seed": seed,
+                    "state": status.get("state", "pending"),
+                    "frames": frames,
+                    "error": status.get("error", ""),
+                }
             )
-        else:
-            launch = validate_protocol_launch(spec, protocol_binding, repo_root=repo_root)
-    managed_spec = dataclasses.replace(
-        spec,
-        experiment={
-            **spec.experiment,
-            "save_folder": str(context.benchmarl_dir.resolve()),
-        },
+        metrics.flush()
+        os.fsync(metrics.fileno())
+    temporary.replace(root / "metrics.csv")
+    atomic_write_text(root / "runs.csv", runs.getvalue())
+
+
+def save_checkpoint(experiment, spec, path):
+    checkpoint = {
+        "schema_version": 1,
+        "spec": resolved_experiment_dict(spec),
+        "frames": experiment.total_frames,
+        "policies": {g: p.state_dict() for g, p in experiment.group_policies.items()},
+        "losses": {g: loss.state_dict() for g, loss in experiment.losses.items()},
+    }
+    temporary = path.with_suffix(".tmp")
+    torch.save(checkpoint, temporary)
+    with temporary.open("rb") as stream:
+        os.fsync(stream.fileno())
+    temporary.replace(path)
+
+
+def load_checkpoint(path, *, save_folder):
+    """Rebuild actors and critics for analysis; this is not optimizer continuation."""
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    if checkpoint["schema_version"] != 1:
+        raise ValueError("Unsupported checkpoint schema")
+    raw = checkpoint["spec"]
+    raw["experiment"].update(
+        save_folder=str(save_folder),
+        restore_file=None,
+        sampling_device="cpu",
+        train_device="cpu",
+        buffer_device="cpu",
     )
-    recorder = RunRecorder(
-        context,
-        managed_spec,
-        repo_root=repo_root,
-        overrides=overrides,
-    )
-    recorder.start()
-
-    if launch is not None or validation_run:
-        from commstudy.experiments.bookkeeping import atomic_write_json, read_json
-
-        metadata = read_json(context.metadata_path, {})
-        metadata["execution_purpose"] = "validation" if validation_run else "scientific"
-        metadata["protocol"] = launch
-        atomic_write_json(context.metadata_path, metadata)
-
+    experiment = build_experiment(experiment_spec_from_dict(raw))
     try:
-        experiment = build_experiment(
-            managed_spec,
-            callbacks=[
-                ExperimentMetricsCallback(
-                    context.run_dir,
-                    heartbeat=recorder.heartbeat,
-                    return_groups=managed_spec.task_config.get(RETURN_GROUPS_KEY),
-                ),
-                *callbacks,
-            ],
-        )
-        recorder.record_experiment(experiment)
-        if expected_contract is not None:
-            from commstudy.experiments.protocols import actual_model_contract, ProtocolGateError
-
-            if actual_model_contract(experiment) != expected_contract:
-                raise ProtocolGateError(
-                    "Built actor/critic/task contract differs from the manifest."
-                )
-        experiment.run()
-        recorder.complete(experiment)
+        for group, state in checkpoint["losses"].items():
+            experiment.losses[group].load_state_dict(state, strict=True)
+        for group, state in checkpoint["policies"].items():
+            experiment.group_policies[group].load_state_dict(state, strict=True)
+        experiment.total_frames = checkpoint["frames"]
         return experiment
-    except BaseException as error:
-        recorder.fail(error)
+    except BaseException:
+        experiment.close()
         raise
+
+
+def run_job(config, method, seed, binding):
+    """Execute one job in its fresh process. Status is committed last."""
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    path = run_directory(config["output_dir"], method, seed)
+    path.mkdir(parents=True, exist_ok=True)
+    status = {
+        "method": method,
+        "seed": seed,
+        "binding": binding,
+        "state": "running",
+        "started_at": utc_now(),
+        "pid": os.getpid(),
+    }
+    atomic_write_json(path / "status.json", status)
+    spec = make_spec(config, method, seed)
+    spec = replace(spec, experiment={**spec.experiment, "save_folder": str(path / ".framework")})
+    experiment = None
+    try:
+        callback = ExperimentMetricsCallback(path, return_groups=spec.task_config["return_groups"])
+
+        def record_progress(record):
+            if record["metric"] == "return_mean" and not record["group"]:
+                status["progress"] = {
+                    "frames": record["frames"],
+                    "phase": record["phase"],
+                    "return_mean": float(record["value"]),
+                }
+                atomic_write_json(path / "status.json", status)
+
+        experiment = build_experiment(spec, callbacks=[callback])
+        callback.writer.on_record = record_progress
+        status["parameter_counts"] = parameter_counts(experiment)
+        status["task_contract"] = task_runtime_contract(experiment)
+        experiment.run()
+        if experiment.total_frames != config["frames"]:
+            raise RuntimeError(f"Expected {config['frames']} frames, got {experiment.total_frames}")
+        if any(
+            not torch.isfinite(p).all()
+            for loss in experiment.losses.values()
+            for p in loss.parameters()
+        ):
+            raise RuntimeError("Nonfinite final learned parameters")
+        save_checkpoint(experiment, spec, path / "checkpoint.pt")
+        status.update(
+            state="completed",
+            frames=experiment.total_frames,
+            sha256={name: file_sha(path / name) for name in ("metrics.csv", "checkpoint.pt")},
+        )
+    except BaseException as error:
+        status.update(
+            state="interrupted" if isinstance(error, KeyboardInterrupt) else "failed",
+            error=f"{type(error).__name__}: {error}",
+        )
+        traceback.print_exc()
+    finally:
+        if experiment is not None:
+            experiment.close()
+        status["finished_at"] = utc_now()
+        atomic_write_json(path / "status.json", status)
+    return 0 if status["state"] == "completed" else 1
+
+
+def run_experiment(config):
+    root = Path(config["output_dir"])
+    manifest = None
+    if config["task"] == "mapdn":
+        from commstudy.tasks.preparation import data_manifest, normalization_windows
+
+        manifest = data_manifest(config)
+        normalization_windows(config, manifest)
+    versions = capture_versions()
+    identity = {
+        "config_sha256": config_fingerprint(config),
+        "source_sha256": source_fingerprint(),
+        "dependencies": versions,
+        "runtime": {"platform": sys.platform, "machine": platform.machine(), "threads": 1},
+        "data_sha256": manifest["sha256"] if manifest else None,
+    }
+    binding = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    with experiment_lock(root) as lock_fd:
+        existing = read_json(root / "provenance.json")
+        if existing is not None and existing.get("binding") != binding:
+            raise ValueError(
+                f"Incompatible config, code, dependencies, or data in {root}; use a new output_dir"
+            )
+        if existing is None:
+            if any((root / name).exists() for name in (*METHODS, "config.yaml", "data")):
+                raise ValueError(f"Unrecognized existing results in {root}; use a new output_dir")
+            source = Path(__file__).resolve().parents[3]
+            git = capture_git_state(source, root) if (source / ".git").exists() else None
+            effective = {
+                method: resolved_experiment_dict(make_spec(config, method, config["seeds"][0]))
+                for method in METHODS
+            }
+            atomic_write_json(
+                root / "provenance.json",
+                {
+                    **identity,
+                    "binding": binding,
+                    "created_at": utc_now(),
+                    "git": git,
+                    "threads_per_worker": 1,
+                    "device": config["execution"]["device"],
+                    "resolved_method_specs": effective,
+                    "data_files": manifest["data"]["files"] if manifest else {},
+                },
+            )
+        atomic_write_text(root / "config.yaml", OmegaConf.to_yaml(config))
+        with (root / "experiment.out").open("a", buffering=1) as log:
+
+            def report(message):
+                line = f"{utc_now()} {message}"
+                print(line, flush=True)
+                log.write(line + "\n")
+
+            if manifest:
+                from commstudy.tasks.preparation import prepare_mapdn
+
+                report("Preparing/checking training-only MAPDN normalization")
+                prepare_mapdn(config, manifest)
+            pending = []
+            for method, seed in allocation(config):
+                if compatible_completion(run_directory(root, method, seed), binding):
+                    report(f"SKIP {method} seed={seed}: completed")
+                else:
+                    pending.append((method, seed))
+            count = worker_count(config["execution"]["workers"])
+            report(f"{len(pending)} jobs to run, {count} workers, 1 numerical thread per worker")
+            active, failures, progress_seen = {}, [], {}
+            env = {
+                **os.environ,
+                **{name: "1" for name in THREAD_ENV},
+                "PYTHONUNBUFFERED": "1",
+                "TQDM_DISABLE": "1",
+            }
+            prior_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+            stop_requested = False
+
+            def interrupted(signum, frame):
+                nonlocal stop_requested
+                stop_requested = True
+
+            for sig in prior_handlers:
+                signal.signal(sig, interrupted)
+            try:
+                while pending or active:
+                    if stop_requested:
+                        raise KeyboardInterrupt("Launch interrupted")
+                    while pending and len(active) < count and not stop_requested:
+                        method, seed = pending.pop(0)
+                        path = run_directory(root, method, seed)
+                        preserve_attempt(path)
+                        atomic_write_json(
+                            path / "status.json", {"state": "running", "binding": binding}
+                        )
+                        with (path / "run.out").open("a") as out:
+                            process = subprocess.Popen(
+                                [
+                                    sys.executable,
+                                    "-m",
+                                    "commstudy.experiments.runner",
+                                    "--worker",
+                                    str(root),
+                                    method,
+                                    str(seed),
+                                ],
+                                stdout=out,
+                                stderr=subprocess.STDOUT,
+                                env=env,
+                                pass_fds=(lock_fd,),
+                                start_new_session=True,
+                            )
+                        active[process] = (method, seed, path)
+                        report(f"START {method} seed={seed}")
+                    for process, (method, seed, path) in list(active.items()):
+                        code = process.poll()
+                        status = read_json(path / "status.json", {})
+                        progress = status.get("progress")
+                        if progress and progress_seen.get((method, seed)) != progress:
+                            report(
+                                f"PROGRESS {method} seed={seed} frames={progress['frames']} "
+                                f"{progress['phase']}/return_mean={progress['return_mean']}"
+                            )
+                            progress_seen[method, seed] = progress
+                        if code is None:
+                            continue
+                        if code != 0 or status.get("state") != "completed":
+                            status.update(
+                                state="failed", error=status.get("error", f"Worker exited {code}")
+                            )
+                            atomic_write_json(path / "status.json", status)
+                            failures.append(f"{method} seed={seed}: {status['error']}")
+                        report(f"{status['state'].upper()} {method} seed={seed}")
+                        del active[process]
+                    time.sleep(0.25)
+            except BaseException:
+                for process in active:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGTERM)
+                for process, (_, _, path) in active.items():
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                    status = read_json(path / "status.json", {})
+                    if status.get("state") != "completed":
+                        status.update(state="interrupted", error="Coordinator interrupted")
+                        atomic_write_json(path / "status.json", status)
+                report(
+                    "Launch interrupted; completed jobs are retained. "
+                    "Other attempts restart next time."
+                )
+                raise
+            finally:
+                for sig, handler in prior_handlers.items():
+                    signal.signal(sig, handler)
+                combine_results(config)
+            for failure in failures:
+                report(f"FAILED {failure}")
+            report(
+                f"Finished: {len(allocation(config)) - len(failures)} completed, "
+                f"{len(failures)} failed"
+            )
+            return 1 if failures else 0
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "--worker":
+        _, root, method, seed = argv
+        config = load_config(Path(root) / "config.yaml")
+        return run_job(
+            config, method, int(seed), read_json(Path(root) / "provenance.json")["binding"]
+        )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("config", type=Path)
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Validate and show jobs without training"
+    )
+    args = parser.parse_args(argv)
+    try:
+        config = load_config(args.config)
+        if args.dry_run:
+            print(
+                f"{config['task']} / {config['algorithm']}: {len(allocation(config))} policies; "
+                f"{config['frames']} joint environment frames each; "
+                f"{worker_count(config['execution']['workers'])} workers"
+            )
+            print(f"Output: {config['output_dir']}")
+            for method, seed in allocation(config):
+                print(f"  {method:10s} seed={seed}")
+            if config["task"] == "mapdn":
+                from commstudy.tasks.preparation import data_manifest, normalization_windows
+
+                normalization_windows(config, data_manifest(config))
+            print("Configuration valid")
+            return 0
+        return run_experiment(config)
+    except KeyboardInterrupt:
+        return 130
+    except (ValueError, TypeError, OSError, KeyError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

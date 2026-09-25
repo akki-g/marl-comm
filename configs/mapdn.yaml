@@ -1,0 +1,76 @@
+algorithm: mappo
+task: mapdn
+seeds:
+- 1100
+- 1101
+- 1102
+- 1103
+- 1104
+frames: 131072
+output_dir: ../logs/mapdn
+algorithm_params:
+  share_param_critic: true
+  clip_epsilon: 0.2
+  entropy_coef: 0.0
+  critic_coef: 1.0
+  loss_critic_type: l2
+  lmbda: 0.9
+  scale_mapping: biased_softplus_1.0
+  use_tanh_normal: true
+  minibatch_advantage: false
+task_params:
+  data_path: ../../MAPDN/mapdn/environments/var_voltage_control/data/case33_3min_final
+  max_steps: 239
+  history: 1
+  measurement_noise: false
+  reset_action: false
+  mode: distributed
+  voltage_barrier_type: l1
+  voltage_weight: 1.0
+  q_weight: 0.1
+  line_weight: null
+  pv_scale: 1.0
+  demand_scale: 1.0
+  v_lower: 0.95
+  v_upper: 1.05
+  action_scale: 0.8
+  action_bias: 0.0
+  state_space:
+  - pv
+  - demand
+  - reactive
+  - vm_pu
+  - va_degree
+  solver_algorithm: nr
+  solver_max_iteration: 20
+  solver_tolerance_mva: 1.0e-08
+model:
+  hidden_dim: 128
+  num_encoder_layers: 2
+  critic_hidden_sizes:
+  - 128
+  - 128
+  message_dim: 32
+  key_dim: 32
+  num_heads: 4
+  rounds: 1
+training:
+  gamma: 0.99
+  lr: 5.0e-05
+  adam_eps: 1.0e-06
+  clip_grad_val: 5.0
+  batch_frames: 256
+  num_envs: 1
+  epochs: 4
+  minibatch_size: 64
+evaluation:
+  interval: 8192
+  episodes: 16
+  deterministic: true
+  static: true
+execution:
+  workers: 5
+  device: cpu
+normalization:
+  episodes: 16
+  seed: 3200000

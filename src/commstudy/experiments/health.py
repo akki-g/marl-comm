@@ -286,7 +286,7 @@ class TrainingHealthCallback(Callback):
                         name: policy.state_dict()
                         for name, policy in self.experiment.group_policies.items()
                     },
-                    "source_sha256": source_fingerprint(Path(__file__).resolve().parents[3]),
+                    "source_sha256": source_fingerprint(),
                 },
                 temporary,
             )
