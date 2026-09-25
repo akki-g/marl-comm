@@ -7,7 +7,7 @@ communication models, tasks, recording and execution.
 
 ## Install
 
-Use Python 3.12 and [uv](https://docs.astral.sh/uv/):
+For local development, use Python 3.12 and [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync --locked
@@ -15,6 +15,8 @@ uv sync --locked
 
 This installs both tasks and plotting. MAPDN's required simulator is included
 in the package; no sibling repository or `PYTHONPATH` setting is needed.
+On UCF Newton, use the Slurm command below: the batch job performs installation
+on a compute node, so `uv` does not need to be available in your login shell.
 
 MAPDN requires your local `case33_3min_final` directory containing `model.p`,
 `pv_active.csv`, `load_active.csv`, and `load_reactive.csv`. The starting config
@@ -52,19 +54,37 @@ output directory. A directory lock prevents concurrent launches. Independent
 jobs finish after another job fails; the command then reports failures and exits
 nonzero. This is restart support, not exact optimizer/checkpoint continuation.
 
-On Slurm, submit from the repository root after installation:
+On **UCF Newton**, submit from the repository root on the login node:
 
 ```bash
 sbatch slurm/run_experiment.sbatch
 ```
 
-This submits a two-task array: index **0 runs PCP**, index **1 runs MAPDN**.
+The wrapper loads `anaconda/anaconda-2024.10`, activates its base Python 3.12,
+installs pinned `uv` 0.12.5 under `.tools/`, and creates/syncs `.venv-newton`
+from `uv.lock`. It activates that environment before running the experiment.
+Both array tasks serialize environment setup; subsequent submissions reuse it.
+Initial setup needs access to Astral/GitHub and the package indexes from the compute node.
+
+This follows UCF's [module and environment instructions](https://arcc.ist.ucf.edu/docs/software/anaconda/),
+which require environment creation/package installation on compute nodes, and its
+[batch submission guide](https://arcc.ist.ucf.edu/docs/scheduler/scripts/).
+The published [module list](https://arcc.ist.ucf.edu/docs/software/availableModules/)
+includes this Anaconda version but does not list `uv`; installation uses
+[Astral's standalone installer](https://docs.astral.sh/uv/getting-started/installation/)
+without changing shell profiles. CUDA/MPI modules are unnecessary for these CPU configs.
+
+This submits a two-task array on UCF's [normal partition](https://arcc.ist.ucf.edu/docs/scheduler/limitations/):
+index **0 runs PCP**, index **1 runs MAPDN**.
 Each task runs its config's 25 policies with five CPU workers, 24 GB of memory
 and a 48-hour time limit. Scheduler output goes to `slurm-<job>_<index>.out`;
 experiment outputs go to the directories configured in YAML.
 For just one experiment, use `sbatch --array=0 slurm/run_experiment.sbatch`
-(PCP) or `--array=1` (MAPDN). Set account/partition or override resources with
-your cluster's `sbatch` options as needed.
+(PCP) or `--array=1` (MAPDN). Check progress with `squeue -u "$USER"`.
+Use `sbatch --account=<your-allocation> ...` if your account requires explicit
+allocation selection; resource requests can also be overridden with `sbatch` options.
+The public guide does not specify your account's wall-time limit; inspect
+`scontrol show partition normal` and adjust `--time` if needed.
 
 ## Results and plots
 
@@ -85,6 +105,9 @@ uv run --locked python scripts/plot.py logs/pcp --list-metrics
 uv run --locked python scripts/plot.py logs/pcp \
   --metrics evaluation/return_mean collection/return_mean
 ```
+
+On Newton, load the same Anaconda module inside a compute allocation and use
+`.venv-newton/bin/python scripts/plot.py ...` instead of the local `uv run` prefix.
 
 Each requested metric creates six PNGs under `plots/`: one five-method comparison
 (mean ± 1 sample standard deviation) and one individual-seed figure per method.

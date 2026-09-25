@@ -88,7 +88,11 @@ real logs produced exactly 12 figures and two correct aggregate CSVs for trainin
 and evaluation returns. The complete 437-test regression passed again.
 
 Both full configs pass dry-run validation and allocate 25 policies each. The
-single Slurm wrapper submits them as array indices 0 (PCP) and 1 (MAPDN). Shell
-syntax and both command routes were checked locally; actual scheduler execution
-requires a Slurm host. No full-budget learning claim or positive communication
-effect follows from these engineering checks.
+single Slurm wrapper submits them as array indices 0 (PCP) and 1 (MAPDN). It loads
+UCF's documented Anaconda module and prepares the locked environment inside the
+compute allocation. Nine additional batch-wrapper tests pass, covering first
+installation, reuse, simultaneous setup, routing, and setup/training failures.
+The pinned standalone uv installer and a locked environment dry-run also passed
+locally. Actual module loading and scheduler execution require a Newton host.
+No full-budget learning claim or positive communication effect follows from
+these engineering checks.
