@@ -1,0 +1,327 @@
+                                                        Sequence Modeling for N-Agent Ad Hoc Teamwork
+
+
+                                                                    Caroline Wang∗                                     Di Yang Shi∗
+                                                            Department of Computer Science                    Department of Computer Science
+                                                            The University of Texas at Austin                 The University of Texas at Austin
+                                                                   Austin, TX 78712                                  Austin, TX 78712
+                                                           caroline.l.wang@utexas.edu                              dyshi@utexas.edu
+
+                                                     Elad Liebman                      Ishan Durugkar                          Arrasy Rahman
+                                                        Amazon†                            Sony AI                      Department of Computer Science
+
+
+
+
+arXiv:2506.05527v3 [cs.MA] 19 Oct 2025
+                                                 liebelad@amazon.com              ishan.durugkar@sony.com               The University of Texas at Austin
+                                                                                                                               Austin, TX 78712
+                                                                                                                          arrasy@cs.utexas.edu
+
+                                                                                               Peter Stone
+                                                                                   Department of Computer Science
+                                                                              The University of Texas at Austin and Sony AI
+                                                                                      pstone@cs.utexas.edu
+
+
+
+                                                                                                Abstract
+                                         N-agent ad hoc teamwork (NAHT) is a newly introduced challenge in multi-agent reinforcement learning, where con-
+                                         trolled subteams of varying sizes must dynamically collaborate with varying numbers and types of unknown teammates
+                                         without pre-coordination. The existing learning algorithm (POAM) considers only independent learning for its flexibility
+                                         in dealing with a changing number of agents. However, independent learning fails to fully capture the inter-agent dy-
+                                         namics essential for effective collaboration. Based on our observation that transformers deal effectively with sequences
+                                         with varying lengths and have been shown to be highly effective for a variety of machine learning problems, this work
+                                         introduces a centralized, transformer-based method for N-agent ad hoc teamwork. Our proposed approach incorporates
+                                         historical observations and actions of all controlled agents, enabling optimal responses to diverse and unseen teammates
+                                         in partially observable environments. Empirical evaluation on a StarCraft II task demonstrates that MAT-NAHT outper-
+                                         forms POAM, achieving superior sample efficiency and generalization, without auxiliary agent-modeling objectives.
+
+
+                                         Keywords:         multi-agent reinforcement learning, ad hoc teamwork, transform-
+                                                           ers, agent modeling
+
+
+                                         Acknowledgements
+                                         This work has taken place in the Learning Agents Research Group (LARG) at UT Austin. LARG research is supported in
+                                         part by NSF (FAIN-2313998, FAIN-2019844, NRT-2125858), ONR (N00014-18-2243), ARO (W911NF-23-2-0004, W911NF-
+                                         17-2-0181), DARPA (Cooperative Agreement HR00112520004 on Ad Hoc Teamwork) Lockheed Martin, and UT Austin’s
+                                         Good Systems grand challenge. Peter Stone serves as the Executive Director of Sony AI America and receives financial
+                                         compensation for this work. The terms of this arrangement have been reviewed and approved by the University of Texas
+                                         at Austin in accordance with its policy on objectivity in research.
+
+
+
+
+                                           ∗
+                                               Equal contribution.
+                                           †
+                                               Work done outside of Amazon
+1   Introduction & Background
+
+Cooperative multi-agent reinforcement learning (CMARL) is a paradigm for learning coordinated team policies on fully
+cooperative tasks, assuming full control over all agents. In contrast, ad hoc teamwork (AHT) considers the challenge of
+training a single agent to collaborate with previously unknown teammates on fully cooperative tasks.
+The recently introduced N-agent ad hoc teamwork (NAHT) problem generalizes both paradigms by considering the
+scenario where a set of controlled agents must collaborate with dynamically varying numbers and types of uncontrolled
+teammates without the ability to pre-coordinate. The primary challenges of the NAHT problem are (1) dealing with a
+changing number of (un)controlled agents, and (2) generalizing to unseen uncontrolled teammate behavior [12].
+As a first solution method for NAHT, Wang et al. [12] proposed the Policy Optimization with Agent Modeling (POAM)
+algorithm. POAM deals with a potentially varying number of controlled agents by employing an independent policy
+gradient approach, where each agent learns an independent policy while performing teammate modeling of all other
+agents in the team. Each agent’s policy conditions on the learned teammate representations, thus enabling the policy to
+approximate the optimal behavior for collaborating with each type of uncontrolled team. While independent learning
+allows dealing with a changing number of controlled agents, the independent policy structure does not enable learning
+all possible joint policies, limiting the richness of team behaviors. This work instead considers a centralized learning
+approach that may still deal with a changing number of controlled agents by leveraging a transformer architecture.
+Transformers have achieved state-of-the-art performance in sequence modeling tasks across language and vision do-
+mains [1, 3, 11]. Their ability to handle variable-length inputs and capture complex dependencies has inspired applica-
+tions in reinforcement learning (RL) as well. For instance, Decision Transformers frame offline RL as a sequence modeling
+task in which a transformer predicts actions based on historical observations and rewards [2].
+Transformer-based architectures have also proven highly successful in CMARL. Kuba et al. [4] proposed a multi-agent
+advantage decomposition theorem, which decomposes the joint (team) advantage by defining an arbitrary ordering
+over agents. Next, the joint advantage can be decomposed into a sum of per-agent advantages, where each agent’s
+advantage depends on the actions selected by prior agents in the ordering. Motivated by the sequential nature of the
+multi-agent advantage decomposition theorem, Wen et al. [13] framed CMARL as a sequential decision-making problem,
+and proposed a transformer-based method for CMARL, called the Multi Agent Transformer (MAT). The MAT is a fully
+centralized approach to CMARL, that has demonstrated state-of-the-art performance in various MARL benchmarks. The
+key idea of MAT is the sequential decision-making paradigm, in which some ordering over teammates is defined, and
+each agent in the ordering makes decisions based on the actions of the previous agents in the ordering. The sequential
+decision-making architecture allows efficient multi-agent policy optimization in a fully centralized setting, that scales
+linearly in the number of agents rather than exponentially. By learning a fully centralized value function, the MAT also
+avoids the need to make limiting value factorization assumptions [5, 8, 9].
+The MAT was originally designed for CMARL tasks, where the team size is fixed and the algorithm has full control
+over all agents. Further, it does not consider history, limiting its applicability for partially observable problems such as
+NAHT. However, based on our observation that the sequential decision-making architecture is suitable for controlling a
+varying number of agents, this work considers a centralized, multi-agent transformer architecture for the NAHT setting,
+which we call MAT-NAHT. The MAT-NAHT architecture performs centralized decision-making for a varying number
+of controlled agents. The controlled subteam is able to respond optimally to diverse and unknown teammates, using
+historical observations and actions of controlled agents. We find that MAT-NAHT demonstrates superior performance
+over POAM in StarCraft II tasks, without explicit agent-modeling auxiliary objectives.
+
+2   Preliminaries
+
+The N-agent ad hoc teamwork (NAHT) problem is formalized in the framework of Decentralized Partially Observable
+Markov Decision Processes (Dec-POMDPs). A Dec-POMDP is described by the tuple ⟨M, S, {Oi }M            i=1 , A, T, r, γ, T ⟩. Here,
+                                                                   QM
+M denotes the number of agents, S the global state space, A = i=1 Ai the joint action space, and Oi the local observation
+space for agent i. Let the notation ∆(•) denote a probability distribution over the space •. The transition function
+T : S × A → ∆(S) governs the dynamics, and the reward function r : S × A → R provides a shared reward signal. In
+this work, we examine a centralized control scheme where each agent selects actions according to the stochastic policy
+π i : H i × A1 × · · · Ai−1 → ∆(Ai ), where H i is the history of observations and actions available to agent i, and the policy
+conditions on the actions selected by agents 1 to i − 1 in some fixed, arbitrary ordering. The decision-making problem
+occurs under the horizon T .
+The NAHT problem considers a controlled set of agents C, and an uncontrolled set U . The learning algorithm generates
+policies for agents in C, while uncontrolled agents in U follow fixed, potentially unknown policies. Each episode begins
+with a team sampling process X(U, C), consisting of two steps: first, the number of controlled agents N < M is sampled,
+and second, a set of N agents is drawn from the controlled set C, while M − N agents are drawn from the uncontrolled
+
+
+                                                                1
+            observation and action
+         history for controlled agents                  Transformer History Encoder
+
+
+
+
+                                                                  Add            Add
+                                                     Multi-Head                              History
+                                         Emb.                      &       MLP    &                     MLP
+                                                     Attention                                Emb.
+                                                                  Norm           Norm
+
+                                                nx
+
+
+
+
+                                                                            Q
+
+
+                                                                   Add                      Add               Add
+                                                     Multi-Head                Multi-Head
+                                         Emb.                       &                        &         MLP     &     MLP
+                                                     Attention               K Attention
+                                                                   Norm                     Norm              Norm
+
+                                                                             V
+                                                nx
+
+                                                                    Autoregressive Action Decoder
+
+
+
+
+Figure 1: Architecture of the multi-agent transformer for NAHT. Only observations and actions corresponding to the
+controlled agents (agents 1, · · · , N ) are provided to the encoder. Similarly, the autoregressive action decoder decodes
+actions for the controlled agents only.
+
+
+set U . The NAHT learning problem considers a parameterized set of controlled agents, C(θ),hPand aimsi to maximize the
+                                                                                              T    t
+expected return under varying teammates and team compositions: maxθ E{πi }M i=1 ∼X(U,C(θ))    t=0 γ rt .
+
+
+
+Training and Evaluation in Practice Similar to the training and evaluation procedure specified by Wang et al. [12],
+we assume access to a training and test set of teammates, Xtrain and Xtest , which are drawn from the same distribution
+over teammate types. NAHT algorithms learn from interaction with teammates within the training set Xtrain , while
+evaluations are conducted with teammates in the test set, Xtest .
+
+
+3   Multi-Agent Transformers for N-Agent Ad Hoc Teamwork
+
+The NAHT problem requires (1) dealing with varying numbers of controlled agents and (2) adapting to diverse types of
+unknown teammates without prior coordination. To address the first requirement, we use a transformer-based architec-
+ture, for its ability to handle variable input sizes and complex dependencies effectively. To address the second, decision
+making is conditioned on the history of observations and actions, to allow implicit teammate behavior modeling.
+Our proposed method, MAT-NAHT, follows the MAT architecture with modifications tailored to the NAHT problem.
+An encoder-decoder transformer [11] acts as both the value and policy network for the controlled team, and is trained
+via the PPO algorithm [7]. The the encoder-decoder transformer receives information from, and specifies actions for, the
+controlled agents only. During training, the restriction of information to controlled agents is implemented by masking
+out data corresponding to the uncontrolled agents. We assume that the observations of the controlled agents contain
+sufficient information about the uncontrolled teammates to enable controlled agents to recognize and respond to uncon-
+trolled teammates. MAT-NAHT’s architecture is illustrated in Figure 1 and described in further detail below.
+
+
+Encoder. The encoder processes the current observation and the history of observations and actions for all controlled
+agents, for the last k timesteps of history. Using an approach similar to the Decision Transformer [2], the sequence of
+agent observation histories is augmented by learned positional encodings, embedded, and then processed using a multi-
+head self-attention mechanism to generate representations of the current and historical observation and actions for all
+controlled agents.
+
+
+                                                                   2
+The learned history representations then play two roles. First, they are passed to the decoder, where they act as the
+query when performing autoregressive action decoding. Second, the representations are further processed into history-
+conditioned, joint value predictions, V (ot |ot−1 , at−1 : ot−k , at−k ).
+
+Decoder. Following Wen et al. [13], the autoregressive decoder generates actions for each controlled agent sequentially,
+conditioned on the history representations and previous actions of controlled agents. The action generation follows a
+fixed, but arbitrary order.
+                                                                                                                                          3sv5z
+4         Experimental Evaluation
+
+This section presents an initial empirical evaluation of the MAT-NAHT method.                                               20
+
+
+
+
+                                                                                                         Mean Test Return
+We investigate the following question: Does MAT-NAHT improve over POAM,
+given multiple types of unseen and uncontrolled teammates?                                                                  15
+
+                                                                                                                            10
+4.1          Experimental Setting
+
+We perform experiments on the StarCraft Multi-Agent Challenge (SMAC) bench-                                                  5
+                                                                                                                                                    Cent Obs POAM
+mark [6], which provides a number of cooperative multi-agent tasks in the set-                                                                      MAT-NAHT
+ting of the popular real-time strategy game, StarCraft II. The tasks consist of allied                                       0
+                                                                                                                                 ippo   iql   mappo qmix    vdn
+teams, which are controlled by a learned team policy, battling enemy teams, which                                                       Target Algorithms
+are controlled by a fixed game AI.
+We select the 3s vs 5z (3sv5z) task for our initial study, which has been consid-                           Figure 2: Mean test return and 95%
+ered a hard task in the literature [13, 14]. This task consists of three allied stalker                     CI on 3sv5z for MAT-NAHT ver-
+units versus five enemy zealot units. To win the battle in the 3sv5z task, the allied                       sus Cent Obs POAM when paired
+agents must learn a mechanic known as “kiting”—where agents alternate move-                                 with Xtest teammates, computed
+ment and attack actions to maximize damage dealt to the enemy, while minimizing                             over five trials. MAT-NAHT has im-
+damage taken.                                                                                               proved generalization compared to
+                                                                                                            Cent Obs POAM, across all five test
+Environment Details The observation space of the SMAC environment consists                                  teammate types.
+of the relative x and y positions of allied and enemy units, relative distances, shield
+health, and unit-type for all units visible within the ego agent’s field of view. It also includes nearby terrain features
+corresponding to height and walkability, and the previous action of all visible units. The action space is discrete and
+consists of the four cardinal movement directions and a no-op action. Dead agents can only take no-op action while live
+agents cannot. Finally, the reward function consists of a term specifying whether the battle was won or lost, and shaping
+terms corresponding to the damage dealt or received, and the number of dead allied and enemy units.
+
+                                     3sv5z                        Uncontrolled Teammates Following the procedure outlined in Wang et al.
+                  22                                              [12], we train five types of uncontrolled teams using five MARL algorithms:
+                  20                                              VDN, IPPO, MAPPO, IQL, and QMIX [9, 14, 10, 5]. For a particular episode
+                  18                                              with M total agents, an uncontrolled team is first sampled uniformly at ran-
+
+
+    Mean Return
+                                                                  dom from the set of five team types. Next, the number of controlled agents
+                  16                                              is sampled uniformly, N ∈ [1, M − 1]. In the episode, N controlled agents
+                  14                                              must coordinate with M − N uncontrolled teammates of the sampled type.
+                  12
+                  10                                              Baseline The only prior algorithm for NAHT is POAM, which is a fully in-
+                                                                  dependent learning method. To enable a fairer comparison to MAT-NAHT,
+                   0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00   which employs a fully centralized critic, we introduce a centralized version
+                                    Timesteps             1e7
+                                                                  of POAM (Cent Obs POAM) that provides the observations of all controlled
+                  MAT-NAHT (No Hist)            Cent Obs POAM     teammates to the critic. Figure 3 shows that Cent Obs POAM improves over
+                  MAT-NAHT                      POAM              POAM in terms of sample efficiency, leading to an approximate improve-
+                                                                  ment of 10% within the training budget.
+Figure 3: Sample efficiency curves with
+a 95% CI on 3sv5z task across five tri- 4.2 Results
+als. This reflects the performance over
+Xtrain teammates averaged over the un- Figure 2 shows the test returns of MAT-NAHT and Cent Obs POAM,
+controlled teammate types.                 when evaluated with the test set of uncontrolled teams, Xtest . MAT-NAHT
+                                           achieves higher test returns than Cent Obs POAM, demonstrating improved
+generalization. Moreover, Figure 3 shows that at training time, MAT-NAHT attains significantly higher sample efficiency
+compared to all other evaluated methods—for instance, converging in less than half the timesteps of Cent Obs POAM.
+
+
+                                                                                 3
+We also performed an ablation study removing the observation history from MAT-NAHT. Figure 3 shows that MAT-
+NAHT without history achieves a lower returns than MAT-NAHT with history, within the training budget with history.
+We hypothesize that MAT-NAHT’s performance drops without history because it is not possible for a policy to distin-
+guish between multiple uncontrolled teammate types, without access to history. Nevertheless, MAT-NAHT without
+history has similar learning efficiency to Cent Obs POAM.
+
+5   Discussion
+Transformer architectures has proven remarkably successful in a large variety of settings. This abstract presents initial
+findings on applying a centralized, transformer-based method for decision-making in N-agent ad hoc teamwork. Initial
+empirical evaluations on a StarCraft II task show that the our method (MAT-NAHT) generalizes better than baselines. In
+future work, we plan to extend evaluation to further tasks, and analyze whether trained MAT-NAHT models are implic-
+itly performing agent modeling. We also plan to consider alternative architectures, such as spacio-temporal transformers
+or state-space models, to enable decision-making with longer historical context over multiple episodes.
+
+References
+ [1] T. Brown, B. Mann, N. Ryder, M. Subbiah, J. D. Kaplan, P. Dhariwal, A. Neelakantan, P. Shyam, G. Sastry, A. Askell,
+     S. Agarwal, A. Herbert-Voss, G. Krueger, T. Henighan, R. Child, A. Ramesh, D. Ziegler, J. Wu, C. Winter, C. Hesse,
+     M. Chen, E. Sigler, M. Litwin, S. Gray, B. Chess, J. Clark, C. Berner, S. McCandlish, A. Radford, I. Sutskever, and
+     D. Amodei. Language models are few-shot learners. In H. Larochelle, M. Ranzato, R. Hadsell, M. Balcan, and
+     H. Lin, editors, Advances in Neural Information Processing Systems, volume 33, pages 1877–1901. Curran Associates,
+     Inc., 2020.
+ [2] L. Chen, K. Lu, A. Rajeswaran, K. Lee, A. Grover, M. Laskin, P. Abbeel, A. Srinivas, and I. Mordatch. Decision
+     transformer: reinforcement learning via sequence modeling. In Advances in Neural Information Processing Systems
+     (NeurIPS), 2021.
+ [3] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai, T. Unterthiner, M. Dehghani, M. Min-
+     derer, G. Heigold, S. Gelly, J. Uszkoreit, and N. Houlsby.              An image is worth 16x16 words: Trans-
+     formers for image recognition at scale. In International Conference on Learning Representations, 2021. URL
+     https://openreview.net/forum?id=YicbFdNTTy.
+ [4] J. G. Kuba, R. Chen, M. Wen, Y. Wen, F. Sun, J. Wang, and Y. Yang. Trust region policy optimization in multi-agent
+     reinforcement learning. In International Conference on Learning Representations, 2022.
+ [5] T. Rashid, M. Samvelyan, C. Schroeder, G. Farquhar, J. Foerster, and S. Whiteson. QMIX: Monotonic value func-
+     tion factorisation for deep multi-agent reinforcement learning. In Proceedings of the 35th International Conference on
+     Machine Learning, volume 80 of Proceedings of Machine Learning Research. PMLR, 2018.
+ [6] M. Samvelyan, T. Rashid, C. S. de Witt, G. Farquhar, N. Nardelli, T. G. J. Rudner, C.-M. Hung, P. H. S. Torr, J. Foerster,
+     and S. Whiteson. The StarCraft Multi-Agent Challenge. CoRR, abs/1902.04043, 2019.
+ [7] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov. Proximal policy optimization algorithms. ArXiv,
+     abs/1707.06347, 2017. URL https://api.semanticscholar.org/CorpusID:28695052.
+ [8] K. Son, D. Kim, W. J. Kang, D. E. Hostallero, and Y. Yi. QTRAN: Learning to Factorize with Transformation for
+     Cooperative Multi-Agent Reinforcement Learning. In Proceedings of the 36th International Conference on Machine
+     Learning, pages 5887–5896. PMLR, May 2019. URL https://proceedings.mlr.press/v97/son19a.html.
+ [9] P. Sunehag, G. Lever, A. Gruslys, W. M. Czarnecki, V. Zambaldi, M. Jaderberg, M. Lanctot, N. Sonnerat, J. Z. Leibo,
+     K. Tuyls, and T. Graepel. Value-decomposition networks for cooperative multi-agent learning based on team re-
+     ward. In Proceedings of the 17th International Conference on Autonomous Agents and Multi Agent Systems, AAMAS ’18,
+     2018.
+[10] M. Tan. Multi-agent reinforcement learning: Independent versus cooperative agents. In International Conference on
+     Machine Learning, 1997. URL https://api.semanticscholar.org/CorpusID:267858156.
+[11] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L. u. Kaiser, and I. Polosukhin. Attention is
+     all you need. In I. Guyon, U. V. Luxburg, S. Bengio, H. Wallach, R. Fergus, S. Vishwanathan, and R. Garnett, editors,
+     Advances in Neural Information Processing Systems, volume 30. Curran Associates, Inc., 2017.
+[12] C. Wang, A. Rahman, I. Durugkar, E. Liebman, and P. Stone. N-agent ad hoc teamwork. In Advances in Neural
+     Information Processing Systems (NeurIPS), 2024.
+[13] M. Wen, J. Kuba, R. Lin, W. Zhang, Y. Wen, J. Wang, and Y. Yang. Multi-agent reinforcement learning is a sequence
+     modeling problem. In Advances in Neural Information Processing Systems, volume 35, 2022.
+[14] C. Yu, A. Velu, E. Vinitsky, Y. Wang, A. Bayen, and Y. Wu. The surprising effectiveness of mappo in cooperative
+     multi-agent games. In Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks, 2022.
+
+
+                                                              4
+

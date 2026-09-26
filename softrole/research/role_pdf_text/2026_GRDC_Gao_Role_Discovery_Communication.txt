@@ -1,0 +1,647 @@
+                                    The Fortieth AAAI Conference on Artificial Intelligence (AAAI-26)
+
+
+
+
+           GRDC: A Unified Graph-Driven Framework for Role Discovery and
+              Communication in Multi-Agent Reinforcement Learning
+                   Zihong Gao1 , Hongjian Liang1 , Yuanhui Hao1 , Lei Hao1 , Liangjun Ke1 *
+                                1
+                             The State Key Laboratory for Manufacturing Systems Engineering,
+          School of Automation Science and Engineering, Xi’an Jiaotong University g1246830895@stu.xjtu.edu.cn,
+            lianghj@stu.xjtu.edu.cn, haoyuanhui@stu.xjtu.edu.cn, lei hao@stu.xjtu.edu.cn, keljxjtu@xjtu.edu.cn
+
+
+                           Abstract
+  Effective coordination in Multi-Agent Reinforcement Learn-
+  ing (MARL) is particularly challenging under partial ob-
+  servability, where agents must identify and coordinate with
+  task-relevant collaborators based solely on local information.
+  Existing methods can be categorised into communication-
+  based approaches, which allow message exchange but ei-
+  ther rigidly predefine or misidentify collaborators, and role-
+  based approaches, which promote functional specialization
+  based on observed behavioural similarity. However, both
+                                                                                (a) Miscommunication.              (b) Misassignment.
+  paradigms overlook the dynamic and context-specific coop-
+  erative dependencies induced by the task, which determine
+  which agents should collaborate, thereby leading to mis-
+                                                                                  Figure 1: Two coordination failures in MARL.
+  communication or role misassignment under partial observ-
+  ability. We introduce GRDC (Graph-driven Role Discovery
+  and Communication), a unified framework that approximates                The absence of collaborator information impedes the emer-
+  these dependencies by dynamically constructing local inter-              gence of coordinated behaviour and degrades overall system
+  action graphs from trajectory embeddings, then uses these                performance.
+  graphs to infer roles via prototype matching and to restrict                Existing efforts address this challenge through two main
+  communication to intra-role agents with attention-based ag-              research lines. Communication-based approaches, exem-
+  gregation. In addition to role inference and communication,              plified by CommNet (Sukhbaatar, Fergus et al. 2016),
+  GRDC promotes a structured and compact role space by max-
+  imising role entropy, decorrelating prototypes, and dynami-
+                                                                           DIAL (Foerster et al. 2016) and ATOC (Jiang and Lu
+  cally pruning redundant prototypes. Experimental results on              2018), learn differentiable message-passing mechanisms
+  Predator Prey, Cooperative Navigation, and SMACv2 demon-                 that enable agents to share internal states or local observa-
+  strate that GRDC consistently outperforms state-of-the-art               tions, thereby improving situational awareness and reducing
+  communication- and role-based baselines, improving coordi-               decision-making uncertainty (Das et al. 2019). In contrast,
+  nation efficiency and training stability across tasks.                   role-based approaches, such as ROMA (Wang et al. 2020a)
+                                                                           and RODE (Wang et al. 2020b), learn functional roles during
+                                                                           training, thereby promoting task specialization and struc-
+                       Introduction                                        tured cooperation. Although the two paradigms differ in im-
+Multi-Agent Reinforcement Learning (MARL) has ad-                          plementation, both aim to model and exploit the latent coop-
+vanced numerous complex sequential decision-making                         erative structure among agents. Yet neither paradigm offers
+tasks that require multi-agent coordination, such as game                  a unified perspective on how cooperation emerges or how it
+AI (Vinyals et al. 2019), autonomous driving (Kiran et al.                 influences message flow and action consistency, resulting in
+2021), and traffic signal control (Wang et al. 2021). A core               two critical limitations.
+challenge of MARL is enabling effective coordination under                    First, many communication methods implicitly equate the
+partial observability, where each agent relies exclusively on              set of agents that exchange messages with the set of agents
+local observations (Nguyen, Nguyen, and Nahavandi 2020).                   that should collaborate (Liu et al. 2023). They ignore that
+Limited observability prevents agents from identifying po-                 cooperative relations are dynamic and heterogeneous, vary-
+tential collaborators, namely those whose behaviour is func-               ing over time and across agent pairs, thus leading to mis-
+tionally coupled with theirs under the given task dynamics.                routed messages and collaboration conflicts. Fig. 1a illus-
+                                                                           trates such a conflict: Zealot 1 communicates only with
+    * Corresponding author.                                                Zealot 3 and thus expects support, whereas Zealot 3 also
+Copyright © 2026, Association for the Advancement of Artificial            messages Zealot 2 and Zealot 4 and actually cooperates with
+Intelligence (www.aaai.org). All rights reserved.                          them, leaving Zealot 1 unsupported and causing its attack
+
+
+                                                                   29441
+on Stalker 1 to fail. Second, role-based methods typically               Markov Decision Process (Dec-POMDP) (Bernstein et al.
+cluster agents by action-space similarity, implicitly assum-             2002), represented by the tuple (N , S, A, O, R, P, γ, µ). In
+ing that similar observable behaviour implies similar func-              this definition,
+                                                                               Q          N is the set of agents; S the state Q space;
+tion (Wang et al. 2020b). This assumption inverts causal-                O = i∈N Oi the joint observation space; A = i∈N Ai
+ity: cooperation induces behavioural similarity, not the re-             the joint action space; R : S × A → R the shared reward;
+verse (Sievers et al. 2024). Fig. 1b shows that Zealot 1 and             P : S × A → S the transition function; γ ∈ [0, 1) the
+Zealot 3 behave similarly yet do not collaborate; a similar              discount factor; and µ the initial state distribution. At each
+mismatch occurs for Zealot 2 and Zealot 4, leading to incor-             timestep t, each agent i ∈ N receives a private observation
+rect role assignments and functional misalignment.                       oti ∈ Oi and selects an action ati ∼ πi (· | oti ) under its
+   To address these limitations, we introduce GRDC                       stochastic policy πi . The joint action at = (at1 , . . . , at|N | )
+(Graph-driven Role Discovery and Communication), a uni-                  induces a transition to the next state st+1 ∼ P(st , at ),
+fied framework that dynamically constructs interaction                   and all agents obtain the shared reward rt = R(st , at ).
+graphs to approximate local cooperative dependencies, and                The objective is to learn a joint policy π = {π1 , . . . , π|N | }
+subsequently uses these graphs to infer functional roles                 that maximizes the expected discounted return J(π) =
+and regulate intra-role communication. GRDC comprises                          PT
+three components. First, each agent dynamically constructs               Eπ,P [ t=0 γ t rt ], where T denotes the finite time horizon.
+a local interaction graph over observable teammates, cap-
+turing cooperative dependencies despite partial observabil-                                     Related Work
+ity. Second, guided by the graph topology, each agent se-                Existing efforts to enhance coordination under partial ob-
+lects a role via prototype matching, which promotes consis-              servability fall into two broad categories: communication-
+tent and discriminative role prototypes while avoiding mis-              based methods and role-based methods.
+classification due to behavioural similarity. Third, GRDC
+employs intra-role communication: message exchange is                    Communication-based MARL. Inter-agent communica-
+confined to intra-role agents, and attention-based aggrega-              tion is critical for coordination under partial observability.
+tion ensures consistent communication while suppressing                  Early studies such as CommNet (Sukhbaatar, Fergus et al.
+cross-role interference. Beyond role inference and com-                  2016), DIAL (Foerster et al. 2016), and IC3Net (Singh, Jain,
+munication, GRDC encourages diversity and compactness                    and Sukhbaatar 2018) adopt centralized protocols where
+through role-entropy maximisation and prototype decorrela-               agents broadcast messages through fully connected topolo-
+tion, and further eliminates under-utilised roles via dynamic            gies. Building on these foundations, FCMNet (Wang and
+prototype pruning.                                                       Sartoretti 2022) and MASIA (Guan et al. 2022) incorporate
+   In contrast to prior methods that address coordination                recurrent encoders and self-supervised objectives to improve
+through either communication or role discovery in isola-                 temporal reasoning and message aggregation. To mitigate
+tion, GRDC introduces a unified framework that grounds                   bandwidth constraints, subsequent work proposes selective
+both paradigms structurally and integrates them function-                or structured communication strategies. Methods such as
+ally, yielding more expressive representations and more re-              SchedNet (Kim et al. 2018), NeurComm (Chu, Chinchali,
+liable communication pathways. Our main contributions are                and Katti 2020), and ETCNet (Hu et al. 2021) learn schedul-
+summarized as follows:                                                   ing mechanisms, whereas I2C (Ding, Huang, and Lu 2020),
+                                                                         CMVC (Gao et al. 2025), VBC (Zhang, Zhang, and Lin
+ • We propose GRDC, a unified graph-driven framework                     2019), and NDQ (Wang et al. 2019) explicitly minimise
+   that jointly infers agent roles and models inter-agent co-            communication overhead by value or mutual-information
+   operative patterns using interaction graphs. This enables             criteria. More recently, attention-based and graph-structured
+   role assignment based on relational semantics rather than             communication has emerged, exemplified by ATOC (Jiang
+   action similarity, reducing misclassification under partial           and Lu 2018), DGN (Jiang et al. 2019), G2ANet (Liu et al.
+   observability.                                                        2020), T2MAC (Sun et al. 2024), SeqComm (Ding et al.
+ • We design an intra-role communication mechanism in                    2024), and TGCNet (Zhang et al. 2025).
+   which information exchange is restricted to agents shar-
+   ing the same role. Combined with attention-based mes-                 Role-based MARL. Role-based approaches aim to im-
+   sage aggregation, this mechanism mitigates collaboration              prove scalability and coordination by partitioning agents
+   conflicts arising from misaligned communication.                      into roles, each associated with distinct sub-tasks or spe-
+                                                                         cialised policies. ROMA (Wang et al. 2020a) introduces a
+ • We evaluate GRDC on three representative partially ob-                stochastic role embedding space in which agents learn iden-
+   servable benchmarks: Predator Prey, Cooperative Nav-                  tifiable and dynamic roles conditioned on local observations.
+   igation, and SMACv2 (Ellis et al. 2023). Results                      RODE (Wang et al. 2020b) further advances role modeling
+   show that GRDC consistently outperforms state-of-the-                 by decomposing the action space based on learned effect-
+   art communication- and role-based baselines, achieving                based action representations. SR-MARL (Zeng, Peng, and
+   higher coordination efficiency and training stability.                Li 2023) proposes structural information principles to sta-
+                                                                         bilize and enhance role learning. LDSA (Yang et al. 2022)
+                Problem Formulation                                      formulates role learning as a dynamic sub-task assignment
+Fully cooperative tasks under partial observability are for-             problem based on structural latent variables, while Nguyen
+mally modelled as a Decentralised Partially Observable                   et al. (Nguyen et al. 2022) study the generalization and trans-
+
+
+                                                                 29442
+fer of role assignments across teams of varying sizes. Go-
+MARL (Zang et al. 2023) clusters agents into functional
+groups to facilitate structured and efficient cooperation.
+
+                             Method
+We introduce Graph-driven Role Discovery and Communi-
+cation (GRDC), a unified framework that combines graph-
+structured local-interaction modelling, prototype-based role
+discovery, and intra-role communication to enable coordina-
+tion under partial observability in multi-agent environments.
+Fig. 2 illustrates the overall framework of GRDC and the
+corresponding pseudocode is shown in Algorithm 1.                                              Figure 2: Framework of GRDC.
+Graph-based Interaction Modeling
+GRDC builds on the insight that coordination in multi-                           zi to the role prototypes via a Gumbel-Softmax distribu-
+agent systems is more likely to emerge among spatially                           tion (Jang, Gu, and Poole 2017):
+adjacent agents (Ohtsuki et al. 2006). To approximate lo-
+                                                                                   frs (ρk | zi ) = GumbelSoftmax zi⊤ Pρ1 , . . . , zi⊤ PρK
+                                                                                                                                           
+cal inter-agent dependencies, each agent dynamically con-
+structs a visibility-constrained interaction graph; two agents                                                                               (2)
+are neighbours if either can partially observe the other.                        This formulation yields discrete yet differentiable role as-
+   For agent i, let oti be its current observation and τit−1 =                   signments, enabling end-to-end optimisation.
+{oi , ai , . . . , ot−1
+   1 1
+                    i   , at−1
+                           i   } its trajectory history. A trajectory            Intra-role Communication
+encoder fen maps (oti , τit−1 ) to an embedding htτi =
+                                                                                 Building on the inferred roles, we introduce an intra-role
+fen (oti , τit−1 ). For notational clarity, the superscript t is omit-           communication mechanism that enables message exchange
+ted in the remainder of this section. Let Gi be the visible                      exclusively among agents sharing the same role, thereby en-
+neighbourhood graph of agent i. The interaction weights are                      forcing structured coordination. The interaction graph cap-
+computed by a soft-attention mechanism (Xu et al. 2015):                         tures spatial dependencies and prototype matching identi-
+                       exp((WQi hτi )⊤ WK
+                                        i
+                                          hτ j )                                 fies functional groups, while intra-role communication rein-
+            g
+           ωij =P                 i     ⊤   i
+                                                                  (1)            forces behavioural consistency within each group.
+                      m∈Gi exp((WQ hτi ) WK hτm )                                   Communication within a role group is beneficial because
+                i                                                                agents perform similar functions and therefore share rele-
+where WQi , WK    , and WVi are learnable projection ma-
+                                                        g                        vant information. Let Gρk denote the agents assigned to role
+trices. Self-connections are excluded by enforcing ωii     =                     ρk . For agent i ∈ Gρk , its role-level aggregated message is
+0.
+P The neighbourhood        feature is aggregated as xi =                         computed as:
+          g   i
+   j∈Gi ωij WV hτj , and the domain representation is defined                                                  X        ρ
+as the concatenation zi = [hτi ∥xi ].                                                               βρi k =           ωij hτ j             (3)
+                                                                                                           j∈Gρk \{i}
+Role Discovery via Prototype Matching                                                   ρ
+                                                                                 where ωij is obtained with an attention mechanism analo-
+Given the domain representation zi , which combines indi-
+                                                                                 gous to Eq. (1). The policy of agent i is conditioned on hτi
+vidual trajectory features with local relational context, we
+                                                                                 and the aggregated intra-role message βρi k , producing the ac-
+formulate a structured role-inference mechanism based on
+prototype matching.                                                              tion ai = πi (hτi , βρi k ).
+    The aim is to capture functional heterogeneity by infer-
+ring agents’ latent roles instead of clustering solely by ob-                    Structural Regularization on Role Representations
+servable similarity. Such functional diversity manifests as                      To preserve both diversity and utility of role prototypes,
+divergent policies or decision patterns. Directly inferring                      we employ three structural regularisation strategies: role en-
+roles from observed actions can be unreliable under partial                      tropy maximisation, prototype decorrelation, and dynamic
+observability because limited context obscures the agents’                       prototype pruning.
+true functions. Fig. 1b illustrates that this limitation yields                  Role Entropy Maximization. To prevent role collapse,
+functionally inconsistent role assignments.                                      we maximise the entropy of the empirical role distribution
+    To remedy this, we infer discrete role assignments from                      across agents. Let q ∈ RB×N ×K be the soft role-assignment
+zi , embedding both the agent’s private trajectory and its lo-                   tensor, where B is the batch size. The empirical marginal
+cal interaction context. This integration endows zi with a                       assignment probability for each role ρk is defined as q̄k =
+locality-aware inductive bias that facilitates role discovery                      1
+                                                                                      PB PN
+grounded in functional and relational semantics.                                 BN     b=1    n=1 qb,n,k . The entropy regularization loss is
+                                                                                 defined as:
+    We define a shared set of K role prototypes, denoted as                                                   K
+ρ = {ρ1 , . . . , ρK }, where each prototype ρk is parameter-
+                                                                                                             X
+                                                                                                    Lre = −      q̄k · log q̄k             (4)
+ized by a learnable vector Pρk ∈ RD . Each agent i matches                                                   k=1
+
+
+                                                                         29443
+Prototype Decorrelation. To reduce redundancy and pro-                             Algorithm 1: GRDC (Graph-driven Role Discovery and
+mote diversity, we explicitly encourage the prototypes to be                       Communication)
+mutually dissimilar. Let Pρ ∈ RK×D be the prototype ma-                            Input: number of prototypes K, pruning sensitivity κ,
+                                                 P
+trix. Each prototype is normalised as P̃ρk = ∥Pρρk∥2 . The                         λre , λrd , PPO clip ϵ, GAE λ, horizon T , episode budget E
+                                                   k
+cosine similarity matrix among prototypes is then computed                         Initialisation: prototype matrix Pρ ∈ RK×D , policy params
+                                                                                          |N |
+                 ⊤                                                                 {θϕi }i=1 , critic params {θψi }, replay buffer B
+as C = P˜ρ · P˜ρ ∈ RK×K , and the decorrelation loss (Zhu                                                               |N |
+et al. 2022) is defined as:                                                        Output: trained policies {πi }i=1
+                      Lpd = ∥C − IK ∥F
+                                      2
+                                                         (5)                        1: Initialise Pρ , θϕ , θψ , replay buffer B
+                                                                                    2: for episode = 1 to E do
+where IK is the K ×K identity matrix and ∥·∥F denotes the
+                                                                                    3:      Reset env; get {o0i , s0 }; t ← 0
+Frobenius norm. This loss penalizes off-diagonal similarity,
+                                                                                    4:      while t < T and not terminal do
+thereby encouraging orthogonality among prototypes.
+                                                                                    5:          Encode trajectory: hτi = fen (oti , τit−1 )
+Dynamic Prototype Pruning. To promote compactness,                                  6:          Build visibility-constrained Gi , compute zi =
+under-utilised prototypes are pruned dynamically dur-                                           [hτi ||xi ]
+ing training. The utilisation of prototype ρk is uk =                               7:          Infer role ρk ∼ GumbelSoftmax(zi⊤ Pρ )
+PB PN
+   b=1    n=1 qb,n,k . A threshold ηmin is defined as ηmin =
+                                                                                    8:          Aggregate intra-role message βρi k via attention
+κ · (B · N ), where κ ∈ (0, 1) is a pruning sensitivity hy-                         9:          Act: ati ∼ πi (hτi , βρi k ); step env; store transition in
+perparameter. The set of active prototypes is then given by                                     B; t ← t + 1
+Gρact = {k ∈ {1, . . . , K} | uk > ηmin }. The prototype ma-                       10:      end while
+trix is updated by retaining only active prototypes:                               11:      Sample minibatch D; compute Lclip , Lre , Lpd
+                         P ← P [Gρact , :]                 (6)                     12:      Update actor: Lactor = Lclip + λre Lre + λpd Lpd ; update
+To ensure stable optimization, the optimizer state associated                               critic by TD error
+with the pruned parameters is reinitialized after each pruning                     13:      Prune prototypes with usage uk < κ|D|; reset opti-
+operation.                                                                                  miser states if pruned
+                                                                                   14: end for
+Optimization with MAPPO                                                            15: return {πi }
+GRDC can be instantiated with either value-based or
+policy-gradient paradigms. In this study, we adopt the
+centralized training and decentralized execution (CTDE)                            Time Complexity Analysis
+paradigm (Lowe et al. 2017) and employ Multi-Agent Prox-                           The overall time complexity of GRDC is given by O(bg n +
+imal Policy Optimization (MAPPO) (Yu et al. 2022) as the                           Kn + bρ n), where n is the number of agents. Here, bg de-
+learning backbone.                                                                 notes the maximum number of neighbours per agent, and
+   Let θϕi denote the parameters of agent i’s policy, encom-                       bρ represents the maximum number of agents that share the
+passing the trajectory encoder, interaction graph module,                          same role. The term O(bg n) accounts for constructing local
+role assignment, intra-role communication, and the policy                          interaction graphs. Once the graphs are constructed, GRDC
+network itself. Let θψi denote the parameters of its critic net-                   performs role assignment for each agent. Since each agent
+work.                                                                              matches against K prototypes, this step results in a com-
+   The policy is updated by the PPO-clip objective:                                plexity of O(Kn). Each agent then engages in intra-role
+             h                                       i
+  Lclip = Et min ψit (θϕi ), clip(ψit (θϕi ), 1 ± ϵ) Ât (7)                       communication with at most bρ peers, resulting in an ad-
+                                                                                   ditional cost of O(bρ n). In our experimental settings, both
+                      πi (at |ht ,β i,t ;θϕ )
+where ψit (θϕi ) = π (ati |htτi ,βρi,tk ;θoldi ) denotes the probability           bg and bρ are constants significantly smaller than n, which
+                        i   i   τi   ρk   ϕi                                       ensures that the overall complexity scales linearly with the
+ratio, and the generalized advantage estimate is computed as                       number of agents. In contrast, prior methods such as SR-
+        P∞
+Ât =               l V         V
+           l=0 (γλ) δt+l with δt+l = r
+                                            t+l
+                                                + γV (st+l+1 ) −                   MARL, MASIA, T2MAC, and TGCNet incur O(n2 ) time
+V (st+l ).                                                                         complexity due to fully connected or dense communication
+   The actor loss additionally contains two regularisation                         topologies among agents.
+terms that encourage diverse role usage and reduce proto-
+type redundancy:                                                                                             Experiments
+               L(θϕi ) = Lclip + λre Lre + λpd Lpd             (8)                 Our experiments aim to answer the following questions: (1)
+where λre and λpd are the coefficients for the role entropy                        Performance: Does GRDC outperform strong MARL base-
+and prototype decorrelation regularisations, respectively.                         lines across diverse benchmarks? (2) Role quality: Do roles
+   The critic is optimized by minimizing the temporal differ-                      induced from local interaction graphs display clear func-
+ence (TD) error:                                                                   tional differentiation and semantic coherence while reducing
+                                                            2                     misassignment under partial observability? (3) Communica-
+    L(θψi ) = Et rt + γV ′ (st+1 ; θψ ′
+                                          ) − V (st ; θψi )
+                  
+                                        i
+                                                               (9)                 tion benefit: Does restricting messages to intra-role peers
+         ′
+where θψi denotes the parameters of the target critic net-                         improve within-team coordination? (4) Structural regulari-
+work.                                                                              sation: Do the role-entropy maximisation, prototype decor-
+
+
+                                                                           29444
+                                                                                                                                     0.8                                     0.8                                      0.4
+
+
+
+
+                                                                                                                     Mean Win Rate                           Mean Win Rate                            Mean Win Rate
+                                                                                                                                     0.6                                     0.6                                      0.3
+                                                                                                                                     0.4                                     0.4                                      0.2
+                                                                                                                                     0.2                                     0.2                                      0.1
+                                                                                                                                     0.0                                     0.0                                      0.0
+                                                                                                                                       0M 2M 4M 6M 8M 10M                      0M 2M 4M 6M 8M 10M                       0M 2M 4M 6M 8M 10M
+                                                                                                                                            Timesteps                               Timesteps                                Timesteps
+                                                                                                                                           (a) protoss 5v5                     (b) protoss 10v10                        (c) protoss 20v23
+                                                                                                                                     0.8                                     0.8                                      0.4
+
+
+
+
+                                                                                                                     Mean Win Rate                           Mean Win Rate                            Mean Win Rate
+                                                                                                                                     0.6                                     0.6                                      0.3
+                                                                                                                                     0.4                                     0.4                                      0.2
+
+                     (a) Cooperative Navigation                               (b) Predator Prey                                      0.2                                     0.2                                      0.1
+                                                                                                                                     0.0                                     0.0                                      0.0
+                                                                                                                                       0M 2M 4M 6M 8M 10M                      0M 2M 4M 6M 8M 10M                       0M 2M 4M 6M 8M 10M
+  Figure 3: Illustration of modified Cooperative Navigation                                                                                 Timesteps                               Timesteps                                Timesteps
+
+  and Predator Prey.                                                                                                                       (d) terran 5v5                          (e) terran 10v10                         (f) terran 20v23
+                                                                                                                                     0.8                                     0.8                                      0.4
+
+
+
+
+                                                                                                                     Mean Win Rate                           Mean Win Rate                            Mean Win Rate
+                                                                                                                                     0.6                                     0.6                                      0.3
+              -2.0                                                    -1.2
+                                                                                                                                     0.4                                     0.4                                      0.2
+              -2.5                                                    -1.6                                                           0.2                                     0.2                                      0.1
+
+
+
+Mean Reward                                             Mean Reward
+              -3.0                                                    -2.0                                                           0.0                                     0.0                                      0.0
+                                                                                                                                       0M 2M 4M 6M 8M 10M                      0M 2M 4M 6M 8M 10M                       0M 2M 4M 6M 8M 10M
+                                                                                                                                            Timesteps                               Timesteps                                Timesteps
+              -3.5                                                    -2.4                                                                  (g) zerg 5v5                           (h) zerg 10v10                           (i) zerg 20v23
+              -4.0                                                    -2.8
+                                                                                                                        Figure 5: Learning curves of GRDC and baselines on nine
+              -4.5                                                    -3.2
+                 0M      2M    4M    6M     8M    10M                    0M   2M   4M    6M       8M   10M              SMACv2 maps.
+                               Timesteps                                           Timesteps
+                     (a) Cooperative Navigation                               (b) Predator Prey
+
+  Figure 4: Learning curves of GRDC and baselines on Coop-                                                              sample efficiency.
+  erative Navigation and Predator Prey.                                                                                    On CN and PP, GRDC obtains the highest mean step re-
+                                                                                                                        wards of −2.29 and −1.33, improving upon the next-best
+                                                                                                                        method MASIA by 8.4% and 10.1%, respectively, and out-
+  relation, and dynamic prototype pruning terms jointly yield                                                           performing the weakest baselines (T2MAC and RODE) by
+  a compact yet diverse role space?                                                                                     up to 47.6%. Furthermore, as shown in Fig. 4, GRDC con-
+                                                                                                                        verges with nearly half the sample budget required by MA-
+  Experimental Setting                                                                                                  SIA on CN, while maintaining narrower confidence intervals
+                                                                                                                        that indicate more stable learning dynamics.
+  We evaluate GRDC on three standard multi-agent bench-                                                                    On the nine SMACv2 combat scenarios, GRDC achieves
+  marks: Cooperative Navigation (CN), Predator Prey (PP),                                                               the highest win rate on eight of them, with the only ex-
+  and SMACv2. To strengthen partial observability in CN                                                                 ception being terran 10v10. On average, GRDC improves
+  and PP, each agent’s field of view is limited to a fixed lo-                                                          win rates by 5.95% over all baselines. On the Protoss maps
+  cal region. As shown in Fig. 3, the vision radius is set to                                                           (5v5, 10v10, 20v23), GRDC achieves win rates of 71.88%,
+  0.3. Consequently, an agent perceives only the relative po-                                                           60.16%, and 22.81%, outperforming the strongest base-
+  sition and velocity of teammates or targets located within                                                            lines by 23.2%, 24.2%, and 212.5%, respectively. For the
+  this radius. We compare GRDC with communication-based                                                                 Terran maps, GRDC achieves 61.72% in 5v5 and 14.70%
+  methods (TGCNet (Zhang et al. 2025), T2MAC (Sun et al.                                                                in 20v23, outperforming the best baselines by 5.3% and
+  2024), MASIA (Guan et al. 2022)), role-based methods (SR-                                                             17.6%, respectively. On terran 10v10, the marginal gap be-
+  MARL (Zeng, Peng, and Li 2023), RODE (Wang et al.                                                                     tween GRDC and MASIA falls within MASIA’s standard
+  2020b)), and the standard MAPPO (Yu et al. 2022). All                                                                 deviation, suggesting no statistically significant difference.
+  methods share the same hyperparameter settings to ensure                                                              On the Zerg maps, GRDC achieves the highest win rates
+  a fair comparison, and complete configurations are reported                                                           across all three tasks, surpassing the strongest baselines by
+  in Appendix A. All metrics are averaged over four indepen-                                                            18.4%, 2.6%, and 5.3%, respectively. As shown in Fig. 5,
+  dent runs with distinct random seeds. The reported learning                                                           GRDC consistently achieves higher win rates during train-
+  curves show the mean and standard deviation with 95% con-                                                             ing and converges faster than all baselines. Its performance
+  fidence intervals.                                                                                                    curves maintain a consistent statistical advantage throughout
+                                                                                                                        most scenarios.
+  Overall Performance                                                                                                      Across all eleven tasks, GRDC’s confidence intervals do
+  Table 1, together with the learning curves in Fig. 4 and                                                              not overlap with those of the weakest baselines, even when
+  Fig. 5, demonstrates that GRDC achieves state-of-the-art                                                              mean performance is similar, indicating statistically sig-
+  performance across all three benchmark suites. The im-                                                                nificant improvements at the 95% confidence level. These
+  provements are evident in both steady-state performance and                                                           results confirm that graph-driven role discovery combined
+
+
+                                                                                                             29445
+           Cooperative    Predator                                                                        SMACv2 (%)
+ Method
+           Navigation       Prey
+                                     protoss 5v5    protoss 10v10 protoss 20v23    terran 5v5              terran 10v10 terran 20v23     zerg 5v5               zerg 10v10   zerg 20v23
+
+ GRDC      -2.29(0.12)   -1.33(0.06) 71.88(10.82)   60.16(13.35)   22.81(18.13)   61.72(10.33) 59.37(8.46)               14.70(9.03)    57.81(7.44) 60.93(8.26) 15.62(5.10)
+ TGCNet    -2.55(0.38)   -1.80(0.32) 41.67(4.78)    42.19(2.21)     0.23(0.39)    58.59(11.79) 61.72(4.68)                7.30(6.61)     30.47(8.97) 35.93(9.02) 5.21(4.77)
+ T2MAC     -3.49(0.65)   -2.53(0.64) 41.41(7.81)    27.08(10.97)    0.00(0.00)    60.15(8.61) 51.56(24.30)                0.00(0.00)    35.94(11.05) 59.37(4.41) 0.00(0.00)
+ MASIA     -2.50(0.34)   -1.48(0.18) 43.75(7.66)     48.43(7.86)    7.30(4.78)     52.34(5.33) 63.28(14.06)              12.50(8.07)    35.15(3.93) 49.21(11.23) 14.84(7.81)
+ SR-MARL   -3.22(0.51)   -2.03(0.39) 29.69(16.63)   24.22(16.21)    0.00(0.00)    36.71(13.59) 32.03(7.38)                0.00(0.00)    28.12(10.52) 28.12(6.25) 0.00(0.00)
+ RODE      -3.43(0.61)   -2.54(0.92) 1.56(2.21)      3.91(2.99)     0.00(0.00)    32.03(22.73) 6.25(7.21)                 0.00(0.00)    24.22(15.59) 4.68(5.41)   0.00(0.00)
+ MAPPO     -2.94(0.23)   -1.96(0.12) 58.32(3.74)    21.37(5.27)     3.12(5.41)     55.03(2.29) 46.05(2.88)                5.71(1.93)     48.83(4.14) 35.18(2.28) 3.87(3.79)
+
+
+Table 1: Performance comparison across Cooperative Navigation (CN), Predator Prey (PP), and nine SMACv2 maps. CN and
+PP results are reported as the mean step reward, whereas SMACv2 results are reported as the mean win rate (%). Each algorithm
+is evaluated with four random seeds, each seed being run for 32 evaluation episodes. Bold numbers mark the best-performing
+algorithm in each environment.
+
+                                                                                                  -1.2                                                 -1.2
+with intra-role communication yields efficient coordination
+under partial observability.                                                                                                                           -1.6
+                                                                                                  -1.6
+
+
+
+                                                                                    Mean Reward                                          Mean Reward
+                                                                                                                                                       -2.0
+                                                                                                  -2.0                                                              GRDC
+Ablation Studies                                                                                             GRDC                                      -2.4         GRDC w/o re
+                                                                                                             GRDC w/o local-graph                                   GRDC w/o pd
+Role Quality. A key contribution of GRDC is its use of                                            -2.4
+                                                                                                             GRDC w/o intro-role comm                  -2.8         GRDC w/o dpp
+local interaction graphs to structurally guide role discovery                                                MAPPO                                                  GRDC w/o re+pd+dpp
+                                                                                                  -2.8                                                 -3.2
+under partial observability. To assess the effectiveness of this                                     0M    2M   4M     6M      8M 10M                     0M   2M   4M    6M    8M 10M
+                                                                                                                Timesteps                                           Timesteps
+graph-based inductive bias, we ablate the graph construc-
+tion module from GRDC. In this variant, each agent infers                             (a) Ablation for local interaction graph             (b) Ablation for three structural regulari-
+its role solely from its own trajectory embedding. This vari-                         and intro-role communication.                        sation methods.
+ant is evaluated in PP, and the learning curves are shown in
+Fig. 6a. Without the graph structure, this variant underper-                          Figure 6: Ablation studies: framework components (left) and
+forms MAPPO and exhibits significantly less stable learn-                             regularisation terms (right).
+ing dynamics. This performance degradation arises because
+trajectory embeddings encode only limited self-observation
+history, which hinders the identification of agents’ func-                            closer in embedding space, as seen with prototypes {4, 5, 8}.
+tional characteristics under partial observability. This lim-                            Overall, GRDC induces roles with clear functional differ-
+itation mirrors the failure modes seen in methods such as                             entiation and semantic coherence, validating the effective-
+RODE, where behaviour-based role discovery is unreliable                              ness of local interaction graphs under partial observability.
+due to the absence of local contextual information. In con-
+trast, GRDC constructs visibility-constrained local graphs                            Communication Benefit. Unlike existing role-based
+that allow each agent to access information from neighbour-                           methods such as RODE and SR-MARL, which coordinate
+ing agents. These structured interactions enable more accu-                           agents through learned features of role-specific action
+rate modelling of role-function dependencies, leading to en-                          spaces, GRDC introduces explicit communication among
+hanced performance and training stability.                                            agents sharing the same role, enabling more direct and
+   To further examine the quality of the learned roles, we                            consistent intra-role coordination. To isolate the impact of
+analyse the role assignments and prototype embeddings in                              intra-role communication, we remove this module from
+CN and PP. We apply 3D Principal Component Analysis                                   GRDC and let each agent i make decisions based solely on
+(PCA) to the learned role prototypes and visualise the result-                        its trajectory encoding and the matched role prototype, i.e.,
+ing distributions in Fig.7. In CN, GRDC consistently assigns                          ai = πi (hτi , Pρk ). As shown in Fig. 6a, although this vari-
+the same role to spatially adjacent agents that tend to occupy                        ant outperforms MAPPO, it suffers a 29.3% performance
+nearby landmarks, indicating semantic coherence and spa-                              drop compared to the full GRDC. This gap suggests that
+tial coordination. The active roles are {0, 1, 3, 4, 9}, whose                        the learned role prototypes, obtained from trajectory and
+prototypes are well separated in the PCA space. In contrast,                          graph-based features [hτi ∥xi ], form semantic clusters of
+the pruned (inactive) prototypes are tightly clustered, reflect-                      agents that share similar functional contexts. Although such
+ing their semantic redundancy. In PP, GRDC assigns the                                role representations offer semantic interpretability, the lack
+same role to predators operating within similar spatial re-                           of communication limits the model’s capacity to dynami-
+gions, who often pursue the same prey. The active roles are                           cally align behaviours across agents within the same role. In
+{1, 3, 4, 5, 8, 9}, which also exhibit dispersed and discrim-                         contrast, GRDC’s attention-based intra-role communication
+inative prototype representations. However, when multiple                             allows agents to aggregate task-relevant messages from
+predators perform highly similar functions, such as pursuing                          same-role collaborators, thereby enhancing behavioural
+prey in overlapping areas, their role prototypes may become                           consistency and enabling context-aware adaptation. This
+
+
+                                                                            29446
+                                 active roles:     0,1,3,4,9
+                                          active roles: 0,1,3,4,9                                active active
+                                                                                                        roles:     1,3,4,5,8,9
+                                                                                                               roles: 1,3,4,5,8,9
+                                                                                                        pruned roles: 0,2,6,7
+                                 pruned roles:    2,5,6,7,8
+                                         pruned roles: 2,5,6,7,8
+                                                                                                 pruned roles: 0,2,6,7
+
+                                      0                                                                      9
+                                                                            3                                                               Figure 8: Episode-averaged action distribution of agents
+                                                9           8                           roles be pruned
+                                                                                                                          6                 with different roles learned by GRDC in protoss 10v10.
+                 4                                          6
+                                                            4                                                             4
+                                                            2               1                                             2
+                                                              PC3                                                             PC3
+                 roles be pruned                            0                            8                                0
+ 8                                                  1               6                                 5
+     6
+                     3                                      2
+                                                                        4                                                 2
+  4                                                         4            2                                  4             4
+                                                                                                                                            mation of well-structured role representations that are se-
+    2                                                                      0
+ PC1 0                                                  4               PC1 2
+         2                                      0
+                                                    2
+                                                                                                              2   4   6                     mantically meaningful, functionally diverse, and stable to
+             4                            2                                     4                         0
+                                  4                                                               2
+                 6
+                         8
+                             6            PC2                                       6
+                                                                                        6
+                                                                                             4            PC2                               train, effectively answering question about regarding the ne-
+(a) Role dynamics and the corresponding                             (b) Role dynamics and the corresponding
+                                                                                                                                            cessity of structured constraints in role discovery.
+3D PCA projection of role prototypes on                             3D PCA projection of role prototypes on
+         Cooperative Navigation                                                  Predator Prey                                              Action Space Similarity
+Figure 7: Role dynamics and 3D Principal Component Anal-                                                                                    To further examine the causal relationship between coopera-
+ysis (PCA) projection analysis of role prototypes learned by                                                                                tion and action similarity, we analyse whether similar action
+GRDC on Cooperative Navigation and Predator Prey.                                                                                           patterns emerge as a consequence of learned cooperation.
+                                                                                                                                            We visualise the target selection behaviours of agents in the
+                                                                                                                                            protoss 10v10 scenario, as shown in Fig. 8. Basic move-
+                                                                                                                                            ment commands are excluded from this analysis, and only
+mechanism improves coordination precision and reduces                                                                                       attack-related decisions towards enemy targets are consid-
+policy variance within role groups.                                                                                                         ered. The set of active roles learned by GRDC in this task is
+   These results affirm that intra-role communication is crit-                                                                              {0, 2, 5, 8}. Agents assigned to different roles exhibit clearly
+ical for aligning behaviours and enabling effective coordina-                                                                               distinct action distributions, while agents sharing the same
+tion under partial observability.                                                                                                           role tend to display highly similar target selection patterns.
+                                                                                                                                            For example, agents {7, 8, 9} assigned to role 2 primarily
+Structural Regularisation. To ensure that the learned                                                                                       focus on enemy targets {3, 4, 5}, whereas agents in role 0
+role space is both compact and diverse, GRDC integrates                                                                                     concentrate on enemies {1, 8}. These observations support
+three structural regularisation techniques: role entropy max-                                                                               the view that functional coordination in GRDC drives the
+imisation, prototype decorrelation, and dynamic prototype                                                                                   emergence of action similarity within roles, rather than clus-
+pruning. To evaluate their effectiveness, we construct four                                                                                 tering agents based on pre-existing behavioural similarity.
+ablated variants by removing each regulariser individually,
+as well as all three simultaneously. Experimental results on
+PP are shown in Fig. 6b. All ablations result in notable per-
+                                                                                                                                                                   Conclusions
+formance drops compared to the full model: 30.1% (without                                                                                   This paper presents GRDC as a unified framework for multi-
+entropy), 34.58% (without decorrelation), 38.35% (without                                                                                   agent coordination under partial observability. It integrates
+pruning), and 68.42% (without any regularisation). More-                                                                                    local interaction graph construction, discrete role assign-
+over, the model becomes unstable when no regularisers are                                                                                   ment via prototype matching, and intra-role communication,
+applied. Among the three, dynamic prototype pruning has                                                                                     all guided by structural regularisation to ensure a compact
+the most significant impact, while entropy maximisation and                                                                                 and semantically coherent role space. By explicitly mod-
+prototype decorrelation yield comparable gains. Each reg-                                                                                   elling task-induced cooperative dependencies, GRDC en-
+ularisation term plays a distinct role. Pruning suppresses                                                                                  ables scalable and robust cooperation. Experimental results
+redundancy by eliminating inactive prototypes, thereby re-                                                                                  across Cooperative Navigation, Predator Prey, and SMACv2
+fining the semantic space and improving compactness. En-                                                                                    demonstrate consistent improvements over strong baselines,
+tropy maximisation prevents role collapse and encourages                                                                                    while ablation studies validate the interpretability of learned
+balanced usage across role types. Prototype decorrelation                                                                                   roles, the utility of intra-role communication, and the effec-
+promotes semantic orthogonality and spatial separation in                                                                                   tiveness of structural regularisation. GRDC provides a prin-
+embedding space, enhancing role discriminability and struc-                                                                                 cipled and effective solution for structured coordination in
+tural diversity. Collectively, these regularisers guide the for-                                                                            multi-agent systems.
+
+
+                                                                                                                                    29447
+                       References                                       Kiran, B. R.; Sobh, I.; Talpaert, V.; Mannion, P.; Al Sallab,
+Bernstein, D. S.; Givan, R.; Immerman, N.; and Zilberstein,             A. A.; Yogamani, S.; and Pérez, P. 2021. Deep reinforcement
+S. 2002. The complexity of decentralized control of Markov              learning for autonomous driving: A survey. IEEE trans-
+decision processes. Mathematics of operations research,                 actions on intelligent transportation systems, 23(6): 4909–
+27(4): 819–840.                                                         4926.
+Chu, T.; Chinchali, S.; and Katti, S. 2020. Multi-agent Re-             Liu, Y.; Wang, W.; Hu, Y.; Hao, J.; Chen, X.; and Gao, Y.
+inforcement Learning for Networked System Control. In                   2020. Multi-agent game abstraction via graph attention neu-
+International Conference on Learning Representations.                   ral network. In Proceedings of the AAAI Conference on Ar-
+                                                                        tificial Intelligence, volume 34, 7211–7218.
+Das, A.; Gervet, T.; Romoff, J.; Batra, D.; Parikh, D.; Rab-
+bat, M.; and Pineau, J. 2019. Tarmac: Targeted multi-agent              Liu, Z.; Wan, L.; Sui, X.; Chen, Z.; Sun, K.; and Lan, X.
+communication. In International Conference on machine                   2023. Deep Hierarchical Communication Graph in Multi-
+learning, 1538–1546. PMLR.                                              Agent Reinforcement Learning. In IJCAI, 208–216.
+Ding, G.; Liu, Z.; Fang, Z.; Su, K.; Zhu, L.; and Lu, Z.                Lowe, R.; Wu, Y. I.; Tamar, A.; Harb, J.; Pieter Abbeel, O.;
+2024. Multi-agent coordination via multi-level communica-               and Mordatch, I. 2017. Multi-agent actor-critic for mixed
+tion. Advances in Neural Information Processing Systems,                cooperative-competitive environments. Advances in neural
+37: 118513–118539.                                                      information processing systems, 30.
+Ding, Z.; Huang, T.; and Lu, Z. 2020. Learning individ-                 Nguyen, D.; Nguyen, P.; Venkatesh, S.; and Tran, T. 2022.
+ually inferred communication for multi-agent cooperation.               Learning to Transfer Role Assignment Across Team Sizes.
+Advances in Neural Information Processing Systems, 33:                  In Proceedings of the 21st International Conference on Au-
+22069–22079.                                                            tonomous Agents and Multiagent Systems, 963–971.
+Ellis, B.; Cook, J.; Moalla, S.; Samvelyan, M.; Sun, M.; Ma-            Nguyen, T. T.; Nguyen, N. D.; and Nahavandi, S. 2020.
+hajan, A.; Foerster, J.; and Whiteson, S. 2023. Smacv2: An              Deep reinforcement learning for multiagent systems: A re-
+improved benchmark for cooperative multi-agent reinforce-               view of challenges, solutions, and applications. IEEE trans-
+ment learning. Advances in Neural Information Processing                actions on cybernetics, 50(9): 3826–3839.
+Systems, 36: 37567–37593.                                               Ohtsuki, H.; Hauert, C.; Lieberman, E.; and Nowak, M. A.
+Foerster, J.; Assael, I. A.; De Freitas, N.; and Whiteson, S.           2006. A simple rule for the evolution of cooperation on
+2016. Learning to communicate with deep multi-agent re-                 graphs and social networks. Nature, 441(7092): 502–505.
+inforcement learning. Advances in neural information pro-               Sievers, B.; Welker, C.; Hasson, U.; Kleinbaum, A. M.; and
+cessing systems, 29.                                                    Wheatley, T. 2024. Consensus-building conversation leads
+Gao, Z.; Qu, C.; Hao, Y.; and Ke, L. 2025. Communica-                   to neural alignment. Nature communications, 15(1): 3936.
+tion in Multiagent Reinforcement Learning via Counterfac-               Singh, A.; Jain, T.; and Sukhbaatar, S. 2018. Learning when
+tual Message Value. IEEE Transactions on Systems, Man,                  to Communicate at Scale in Multiagent Cooperative and
+and Cybernetics: Systems, 55(11): 8152–8165.                            Competitive Tasks. In International Conference on Learn-
+Guan, C.; Chen, F.; Yuan, L.; Wang, C.; Yin, H.; Zhang, Z.;             ing Representations.
+and Yu, Y. 2022. Efficient multi-agent communication via                Sukhbaatar, S.; Fergus, R.; et al. 2016. Learning multiagent
+self-supervised information aggregation. Advances in Neu-               communication with backpropagation. Advances in neural
+ral Information Processing Systems, 35: 1020–1033.                      information processing systems, 29.
+Hu, G.; Zhu, Y.; Zhao, D.; Zhao, M.; and Hao, J.                        Sun, C.; Zang, Z.; Li, J.; Li, J.; Xu, X.; Wang, R.; and Zheng,
+2021. Event-triggered communication network with limited-               C. 2024. T2mac: Targeted and trusted multi-agent commu-
+bandwidth constraint for multi-agent reinforcement learn-               nication through selective engagement and evidence-driven
+ing. IEEE Transactions on Neural Networks and Learning                  integration. In Proceedings of the AAAI Conference on Arti-
+Systems, 34(8): 3966–3978.                                              ficial Intelligence, volume 38, 15154–15163.
+Jang, E.; Gu, S.; and Poole, B. 2017. Categorical Reparam-              Vinyals, O.; Babuschkin, I.; Czarnecki, W. M.; Mathieu, M.;
+eterization with Gumbel-Softmax. In International Confer-               Dudzik, A.; Chung, J.; Choi, D. H.; Powell, R.; Ewalds,
+ence on Learning Representations.                                       T.; Georgiev, P.; et al. 2019. Grandmaster level in Star-
+Jiang, J.; Dun, C.; Huang, T.; and Lu, Z. 2019. Graph Con-              Craft II using multi-agent reinforcement learning. Nature,
+volutional Reinforcement Learning. In International Con-                575(7782): 350–354.
+ference on Learning Representations.                                    Wang, T.; Dong, H.; Lesser, V.; and Zhang, C. 2020a.
+Jiang, J.; and Lu, Z. 2018. Learning attentional communica-             ROMA: Multi-Agent Reinforcement Learning with Emer-
+tion for multi-agent cooperation. Advances in neural infor-             gent Roles. In International Conference on Machine Learn-
+mation processing systems, 31.                                          ing, 9876–9886. PMLR.
+Kim, D.; Moon, S.; Hostallero, D.; Kang, W. J.; Lee, T.; Son,           Wang, T.; Gupta, T.; Mahajan, A.; Peng, B.; Whiteson, S.;
+K.; and Yi, Y. 2018. Learning to Schedule Communication                 and Zhang, C. 2020b. RODE: Learning Roles to Decompose
+in Multi-agent Reinforcement Learning. In International                 Multi-Agent Tasks. In International Conference on Learn-
+Conference on Learning Representations.                                 ing Representations.
+
+
+                                                                29448
+Wang, T.; Wang, J.; Zheng, C.; and Zhang, C. 2019. Learn-
+ing Nearly Decomposable Value Functions Via Communica-
+tion Minimization. In International Conference on Learning
+Representations.
+Wang, X.; Ke, L.; Qiao, Z.; and Chai, X. 2021. Large-Scale
+Traffic Signal Control Using a Novel Multiagent Reinforce-
+ment Learning. IEEE Transactions on Cybernetics, 51(1):
+174–187.
+Wang, Y.; and Sartoretti, G. 2022. FCMNet: Full Commu-
+nication Memory Net for Team-Level Cooperation in Multi-
+Agent Systems. In Proceedings of the 21st International
+Conference on Autonomous Agents and Multiagent Systems,
+1355–1363.
+Xu, K.; Ba, J.; Kiros, R.; Cho, K.; Courville, A.; Salakhudi-
+nov, R.; Zemel, R.; and Bengio, Y. 2015. Show, attend
+and tell: Neural image caption generation with visual at-
+tention. In International conference on machine learning,
+2048–2057. PMLR.
+Yang, M.; Zhao, J.; Hu, X.; Zhou, W.; Zhu, J.; and Li, H.
+2022. Ldsa: Learning dynamic subtask assignment in co-
+operative multi-agent reinforcement learning. Advances in
+neural information processing systems, 35: 1698–1710.
+Yu, C.; Velu, A.; Vinitsky, E.; Gao, J.; Wang, Y.; Bayen, A.;
+and Wu, Y. 2022. The surprising effectiveness of ppo in
+cooperative multi-agent games. Advances in neural infor-
+mation processing systems, 35: 24611–24624.
+Zang, Y.; He, J.; Li, K.; Fu, H.; Fu, Q.; Xing, J.; and Cheng,
+J. 2023. Automatic grouping for efficient cooperative multi-
+agent reinforcement learning. Advances in neural informa-
+tion processing systems, 36: 46105–46121.
+Zeng, X.; Peng, H.; and Li, A. 2023. Effective and stable
+role-based multi-agent collaboration by structural informa-
+tion principles. In Proceedings of the AAAI conference on
+artificial intelligence, volume 37, 11772–11780.
+Zhang, S. Q.; Zhang, Q.; and Lin, J. 2019. Efficient commu-
+nication in multi-agent reinforcement learning via variance
+based control. Advances in Neural Information Processing
+Systems, 32.
+Zhang, Z.; He, B.; Cheng, B.; and Li, G. 2025. Bridg-
+ing training and execution via dynamic directed graph-based
+communication in cooperative multi-agent systems. In Pro-
+ceedings of the AAAI Conference on Artificial Intelligence,
+volume 39, 23395–23403.
+Zhu, J.; Wang, Z.; Chen, J.; Chen, Y.-P. P.; and Jiang, Y.-G.
+2022. Balanced contrastive learning for long-tailed visual
+recognition. In Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition, 6908–6917.
+
+
+
+
+                                                                 29449
+

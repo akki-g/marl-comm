@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-25",
+  "main_report_pages": 15,
+  "main_report_sha256": "0157152f3ef137157a4165db673d591106c929120fe3582d2b59bef60d92af6f",
+  "pdf_sha256": "d77dc2e3c211f28f4031ce3ac107e5b95dea64a1d94fcf50cd7793446bd16ecb",
+  "tracked_works": 43,
+  "available_main_pdfs": 39,
+  "local_pdf_files_including_versions_supplements_and_duplicate": 43,
+  "implementation_changed": false,
+  "training_run": false,
+  "checks": [
+    "Independent mathematical review",
+    "Independent literature review",
+    "Local file links resolved",
+    "PDF signatures and file hashes checked",
+    "TeX math delimiters balanced",
+    "Final PDF compiled; earlier same-layout tables/equations inspected visually",
+    "Project git status contains only untracked softrole folder"
+  ]
+}

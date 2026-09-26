@@ -1,0 +1,794 @@
+         Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+
+                     Arrasy Rahman 1 Niklas Höpner 2 Filippos Christianos 1 Stefano V. Albrecht 1
+
+
+                            Abstract                              Prior ad hoc teamwork approaches (Barrett & Stone, 2015;
+        Ad hoc teamwork is the challenging problem of             Albrecht et al., 2016; Barrett et al., 2017; Ravula et al.,
+        designing an autonomous agent which can adapt             2019; Chen et al., 2020) achieved this aim by combining
+        quickly to collaborate with teammates without             single-agent RL and agent modeling techniques to learn
+        prior coordination mechanisms, including joint            from direct interaction with other agents. These approaches
+        training. Prior work in this area has focused on          were designed for closed teams in which the number of
+        closed teams in which the number of agents is             agents is fixed. In practice, however, many tasks also require
+        fixed. In this work, we consider open teams by            the learner to adapt to a changing number of agents in the
+        allowing agents with different fixed policies to          environment. For example, consider an autonomous car
+        enter and leave the environment without prior no-         that needs to drive differently depending on the number
+        tification. Our solution builds on graph neural           of nearby vehicles, which may be driven by humans or
+        networks to learn agent models and joint-action           produced by different manufacturers, and their respective
+        value models under varying team compositions.             driving styles (Albrecht et al., 2021).
+        We contribute a novel action-value computation            We make a step towards the full ad hoc teamwork challenge
+        that integrates the agent model and joint-action          by considering open teams in which agents with various
+        value model to produce action-value estimates.            fixed policies may enter and leave the team at any time and
+        We empirically demonstrate that our approach              without prior notification. Open ad hoc teamwork involves
+        successfully models the effects other agents have         three main challenges that must be addressed without pre-
+        on the learner, leading to policies that robustly         coordination. First, the learner must quickly adapt its policy
+        adapt to dynamic team compositions and signifi-           to the unknown policies of other agents. Second, handling
+        cantly outperform several alternative methods.            openness requires the learner to adapt to changing team
+                                                                  sizes in addition to other agents’ types, which may affect the
+                                                                  policy and role a learner must adopt within the team (Tambe,
+1. Introduction                                                   1997). Third, the changing number of agents results in a
+Many real-world problems require autonomous agents to             state vector of variable length, which causes standard RL
+perform tasks in the presence of other agents. Recent multi-      approaches that require fixed-length state vectors to perform
+agent reinforcement learning (MARL) approaches (e.g.              poorly, as we show in our experiments.
+Christianos et al., 2020; Foerster et al., 2018; Rashid et al.,   We propose a novel algorithm designed for open ad hoc
+2018; Lowe et al., 2017) solve such problems by jointly           teamwork, called Graph-based Policy Learning (GPL) 3 ,
+training a set of agents with shared learning procedures.         which addresses the aforementioned challenges. GPL adapts
+However, as agents become capable of long-term autonomy           to dynamic teams by training a joint action value model
+and are used for a growing number of tasks, it is possible        which allows the learner to disentangle the effect each
+that agents may have to interact with previously unknown          agent’s action has on the learner’s returns. To select optimal
+other agents, without the opportunity for prior joint training.   actions from the joint action value model, we contribute a
+Thus, research in ad hoc teamwork (Stone et al., 2010) aims       novel action-value computation method which integrates
+to design a single autonomous agent, which we refer to as         joint-action value estimates with action predictions learned
+the learner, that can interact effectively with other agents      using an agent model. To handle dynamic team sizes, the
+without pre-coordination such as joint training.                  joint action value model and agent model are both based on
+    1
+      School of Informatics, University of Edinburgh, Edin-       graph neural network (GNN) architectures (Tacchetti et al.,
+burgh, United Kingdom 2 University of Amsterdam, Amster-          2019; Böhmer et al., 2020) which have proven useful for
+dam, Netherlands. Correspondence to: Arrasy Rahman <ar-           dealing with changing input sizes (Hamilton et al., 2017;
+rasy.rahman@ed.ac.uk>.
+                                                                     3
+                                                                     Implementation code can be found at https://github.
+                       th
+Proceedings of the 38 International Conference on Machine         com/uoe-agents/GPL
+Learning, PMLR 139, 2021. Copyright 2021 by the author(s).
+                            Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+Jiang et al., 2019). Our computed action values can be used      actions to augment the input into a policy network, which
+within different value-based single-agent RL algorithms; in      did not lead to higher final returns in their empirical evalua-
+our experiments we test two versions of GPL, one based on        tion. Our experiments also show that their method leads to
+Q-learning (Mnih et al., 2015) and one based on soft policy      worse generalization to teams with different sizes.
+iteration (Haarnoja et al., 2018).
+                                                                 Multi-agent reinforcement learning (MARL): MARL al-
+Our experiments evaluate GPL and various baselines in three      gorithms use RL techniques to co-train a set of agents in a
+multi-agent environments (Level-based foraging (Albrecht         multi-agent system (Papoudakis et al., 2019). In contrast,
+& Ramamoorthy, 2013), Wolfpack (Leibo et al., 2017), For-        ad hoc teamwork focuses on training a single agent to in-
+tAttack (Deka & Sycara, 2020)) for which we use different        teract with a set of agents of unknown types that are in
+processes to specify when agents enter or leave the environ-     control over their own actions. One approach in MARL is
+ment and their type assignments. We compare GPL against          to learn factored action values to simplify the computation
+ablations of GPL that integrate agent models using input con-    of optimal joint actions for agents, using agent-wise action
+catenation, a common approach used by prior works (Grover        values (Rashid et al., 2018; Sunehag et al., 2018) and co-
+et al., 2018; Tacchetti et al., 2019); as well as two MARL       ordination graphs (CG) (Böhmer et al., 2020; Zhou et al.,
+approaches (MADDPG (Lowe et al., 2017), DGN (Jiang               2019). Unlike these methods which use CGs to model joint
+et al., 2019)). Our results show that both tested GPL variants   action values for fully cooperative setups, we use CGs in ad
+achieve significantly higher returns than all other baselines    hoc teamwork to model the impact of other agents’ actions
+in most learning tasks, and that GPL generalizes more ef-        towards the learning agent’s returns. Jiang et al. (2019)
+fectively to previously unseen team sizes/compositions. We       consider MARL in open systems by utilizing GNN-based
+also provide a detailed analysis of learned concepts within      architectures as value networks. In our experiments we use
+GPL’s joint action value models.                                 a baseline following their method and show that it performs
+                                                                 significantly worse than GPL.
+2. Related Work
+                                                                 3. Problem Formulation
+Ad hoc teamwork: Ad hoc teamwork is at its core a single-
+agent learning problem in which the agent must learn a           The goal in open ad hoc teamwork is to train a learner agent
+policy that is robust to different teammate types (Stone         to interact with other agents that have unknown behavioural
+et al., 2010). Early approaches focused on matrix games in       models, called types, and which may enter or leave the en-
+which the teammate behavior was known (Agmon & Stone,            vironment at any timestep. We formalize the problem of
+2012; Stone et al., 2009). A predominant approach in ad hoc      open ad hoc teamwork by extending the Stochastic Bayesian
+teamwork is to compute Bayesian posteriors over defined          Game model (Albrecht et al., 2016) to allow for openness.
+teammate types and utilizing the posteriors in reinforce-        The current formulation focuses on fully observable en-
+ment learning methods (such as Monte Carlo Tree Search)          vironments and extending the framework to the partially
+to obtain optimal responses (Barrett et al., 2017; Albrecht      observable case is left as future work.
+et al., 2016). Recent methods applied deep learning-based
+techniques to handle switching agent types (Ravula et al.,       3.1. Open Stochastic Bayesian Games (OSBG)
+2019) and to pretrain and select policies for different team-
+mate types (Chen et al., 2020). All of these methods were        An OSBG is a tuple (N, S, A, Θ, R, P ), where N ,S,A,Θ
+designed for closed teams. In contrast, GPL is the first algo-   represent the set of agents, the state space, the action space,
+rithm designed for open ad hoc teamwork in which agents          and the type space, respectively. For simplicity we assume
+of different types can dynamically enter and leave the team.     a common action space for all agents, but this can be gen-
+                                                                 eralised to individual action spaces for each agent. Let P
+Agent modeling: An agent model takes a history of obser-         denote the power set. To define joint actions under vari-
+vations (e.g actions, states) as input and produces a predic-    able number of agents, we define a joint agent-action space
+tion about the modeled agent, such as its goals or future        AN = {a|a ∈ P(N × A), ∀(i, ai ), (j, aj ) ∈ a : i =
+actions (Albrecht & Stone, 2018). Recent agent model-            j ⇒ ai = aj } and refer to the elements a ∈ AN as joint
+ing frameworks explored in deep reinforcement learning           agent-actions. Similarly, we define a joint agent-type space
+(Raileanu et al., 2018; Rabinowitz et al., 2018; He et al.,      ΘN = {θ|θ ∈ P(N × Θ), ∀(i, θi ), (j, θj ) ∈ θ : i = j ⇒
+2016) are designed for closed environments. In contrast,         θi = θj }, refer to θ ∈ ΘN as the joint agent-type and use
+we consider open multi-agent environments in which the           θi to denote the type of agent i in θ. The conditions in
+number of active agents and their policies can vary in time.     the definition of ΘN and AN constrain each agent to only
+Tacchetti et al. (2019) proposed to use graph neural networks    select one action while also being assigned to one type.
+for modeling agent interactions in closed environments. Un-
+like GPL, their method uses predicted probabilities of future    We assume the learner can observe the current state of the
+                                Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+environment and the past actions of other agents but not             such as Q-Learning (Watkins & Dayan, 1992) will always
+their types. The learner’s reward is determined by R : S ×           update the action-values of the learner’s previous action,
+AN 7→ R. The transition function P : S × AN 7→ ∆(S ×                 even if that action had minimal impact towards the observed
+ΘN ) determines the probability of the next state and joint          reward from an OSBG. In MARL, a similar credit assign-
+agent-types, given the current state and joint agent-actions,        ment problem is commonly addressed by using a centralized
+where ∆(X) is the set of all probability distributions over          critic (Lowe et al., 2017; Foerster et al., 2018) that disentan-
+X. Although the transition function allows agents to have            gles the effects of other agents’ actions to a learner’s return
+changing types, our current work assumes that an agent’s             by estimating a joint-action value function. Inspired by
+type is fixed between entering and leaving the environment.          the importance of joint-action value modeling for credit as-
+                                                                     signment, GPL includes a component for joint-action value
+Under an OSBG, the game starts by sampling an initial state,
+                                                                     estimation. The joint-action value of a policy, Qπi (s, a), is
+s0 , and an initial set of agents, N0 , with associated types, θ0i
+                                                                     defined as:
+with i ∈ N0 , from a starting distribution P0 ∈ ∆(S × ΘN ).
+                                                                                             ∞
+At state st , agents Nt ⊆ N with types θti , i ∈ Nt exist in the
+                                                                                           X                                  
+                                                                                                 t
+                                                                      Eai ∼πi ,a−i ∼π−i ,P      γ R(st , at ) s0 = s, a0 = a . (3)
+environment and choose their actions ait by sampling from                t      t
+                                                                                              t=0
+π. As a consequence of the selected joint agent-actions, the
+learner receives a reward computed through R. Finally, the           In contrast to Equation (1), this joint-action value denotes
+next state st+1 and the next set of existing agents Nt+1 and         the learner’s expected return after the joint agent-action a at
+types are sampled from P given st and joint agent-actions.           s. Modeling joint-action values prevents the learner from
+                                                                     only crediting its own action if it has minimal contribution
+3.2. Optimal Policy for OSBG                                         towards rewards that it experienced.
+
+Assuming that i denotes the learning agent, the learning             Unlike centralized training for MARL (Lowe et al., 2017)
+objective in an OSBG is to estimate the optimal policy               where the TD-error for training a joint-action value model
+defined below:                                                       can be approximated by using other agents’ known policies,
+                                                                     in ad hoc teamwork using joint-action value models intro-
+Definition 1. Let the joint actions and the joint policy of          duces problems in computing optimal actions and temporal
+agents other than i at time t be denoted by a−i               −i
+                                                     t and π t ,     difference errors. This results from the assumption in ad
+respectively. Given a discount factor, 0 ≤ γ ≤ 1, we define          hoc teamwork of not knowing other agents’ policies during
+the action-value of policy π i , Q̄πi (s, ai ), as :                 training and execution. Therefore, the uncertainty in other
+                        ∞
+                       X                                           agents’ actions must be accounted for in the action value
+                            t                         i    i
+  Eai ∼πi ,a−i ∼π−i ,P    γ R(st , at ) s0 = s, a0 = a ,             computation in ad hoc teamwork.
+     t     t      t
+                         t=0
+                                                            (1)      To perform joint-action value training and action selection
+which denotes the expected discounted return after the               for ad hoc teamwork, we approximate the learner’s action
+learner executes ai at s. A policy, π i,∗ , is optimal if :          value function Q̄πi by simultaneously learning a factorized
+                                                                     joint action value model and an agent model that that ap-
+            ∀π i , s, ai , Q̄πi,∗ (s, ai ) ≥ Q̄πi (s, ai ).   (2)    proximates πt−i (a−i        −i
+                                                                                        t |st , θ ) (see Section 4.2). We can
+
+Given Q̄πi,∗ (s, a), an OSBG is solved by always choosing            then approximate the expectation in Equation 1 by weight-
+ai with the highest action-value at s.                               ing the action value components with the likelihood of the
+                                                                     corresponding agents’ actions following :
+
+4. Graph-based Policy Learning                                         Q̄πi (st , ait ) = Ea−i ∼π−i (.|st ,ai ,θ−i ) [Q(st , a)|ai = ait ].
+                                                                                            t    t          t
+                                                                                                                                          (4)
+We introduce the general components of GPL and their re-
+spective role for estimating an OSBG’s optimal policy. We            Other strategies to deal with the uncertainty in other agents
+also describe the neural network architectures and learn-            actions are possible. Being optimistic one can choose ai
+ing procedures used for implementing each component. A               from the joint agent-action with maximum value, which
+general overview of GPL’s architecture is provided in Fig-           can yield in suboptimal policies for ad hoc teamwork since
+ure 1 while the complete learning pseudocode is given in             other agents may choose actions that do not maximize the
+Appendix D.                                                          learners returns. Given an agent model that predicts agents
+                                                                     next actions one could also sample other agents actions and
+                                                                     compute an average joint action value for each of the learn-
+4.1. Method Overview and Motivation
+                                                                     ers actions. During learning of the action value model, one
+In an OSBG, agents’ joint actions inherently affect the              can even use information of joint actions taken at previous
+learner’s return through the rewards and next states it expe-        state to compute the TD-error following SARSA (Rum-
+riences. A learner using common value-based RL methods               mery & Niranjan, 1994). However, these sampling-based
+                              Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+
+ Agent 1:                                                                   Q(a1t )              Q(a1t , a2t )           Q(a2t )      Qi (st , at )
+                                                 M LPβ                                  a1t                        a2t
+ (x1t , ut )             LST MαQ θt,Q
+                                                                                                                                                        RL-Loss
+                                                 M LPδ                           Q(a1t , a3t )                   Q(a2t , a3t )
+                                                                                                     a3t                              Q̄i (st , ait )
+                                                                     Joint Action Value Model               Q(a3t )
+ Agent 2:                                                                                                                                   Marginalization
+ (x2t , ut )      B
+                                               1                           2
+                                              θt,q                        θt,q        n̄1t,q                              n̄2t,q     qζ,η (a1t |st )
+                                                       Gin (θt,q )                                                                   qζ,η (a2t |st )    NLL-Loss
+ Agent 3:                LST Mαq θ
+                                   t,q
+                                                           3
+                                                                            GN Nζ                                        M LPη       qζ,η (a3t |st )
+ (x3t , ut )                                              θt,q                                         n̄3t,q
+                   Type Inference Model                                    Agent Model
+
+
+
+
+Figure 1. Overview of GPL. The joint action value model (red box) and agent model (blue box) receive type vectors produced by their
+own type embedding networks (green box), which are parameterized by αQ and αq respectively. These type vectors are processed by the
+joint-action value and agent model that are parameterized by (β, δ) and (µ, ν) respectively. Output from joint action value model and
+agent model is finally combined using Equation 9 to compute the action-value function, using which the learner chooses its action.
+
+
+approaches may increase the variance of the action value                 The LSTM takes the observation (ut ) and agent-specific
+estimates, which may decrease learner’s performance.                     information (xit ), which are both derived from st , to produce
+                                                                         a hidden-state vector as an agent’s type embedding. GPL
+GPL’s last component is the type inference component. In
+                                                                         then uses the type embeddings as input for the joint action
+an OSBG, types affect Q(s, a) and π −i (a−i |s, θ−i ) by de-
+                                                                         value and agent modeling network. Although the joint action
+termining other agent’s immediate and future actions. Esti-
+                                                                         value and agent modeling feature may use the same type
+mation of Q(s, a) and π −i (a−i |s, θ−i ) must therefore take
+                                                                         inference network, separate networks are used to prevent
+agent types as input. However, agent types are unknown
+                                                                         both model’s gradients from interfering against each other
+and must be inferred from agents’ observed behavior, which
+                                                                         during training. Further details on the preprocessing method
+we detail in Section 4.2.
+                                                                         to derive ut and xit from st , along with the computation of
+The aforementioned GPL components are finally imple-                     type vectors are provided in Appendix C.
+mented using neural networks that facilitate an efficient
+                    ∗,i                                                  Joint action value estimation: We implement GPL’s
+computation of Q̄π (s, ai ) by imposing a simple factoriza-              joint action value model as fully connected Coordination
+tion of the joint action value based on coordination graphs              Graphs (Guestrin et al., 2002) (CGs) for three reasons. First,
+(Guestrin et al., 2002). Furthermore, environment openness               CGs factorize the joint action value in a way that facilitates
+is handled by implementing the joint-action value and agent              efficient action-value computation, which we will elaborate
+modeling components with GNNs, which we describe in                      further when discussing GPL’s action-value computation.
+the next section. This produces a flexible way of computing              Second, CGs can be implemented as GNNs (Böhmer et al.,
+    ∗,i
+Q̄π (s, ai ) for any team sizes.                                         2020), which we demonstrate in Section 5.5 to be impor-
+                                                                         tant for handling environment openness. Third, the afore-
+4.2. The GPL Architecture                                                mentioned action value factorization also enables CGs to
+In this section, we outline the neural network architectures             model the contribution of other agents’ actions towards the
+used for implementing GPL’s three components (cf. Figure                 learner’s returns, which we show in Section 5.6 to be the
+1). This is followed by a description of the loss functions for          main reason behind GPL’s superior performance compared
+training the neural networks representing each component.                to baselines.
+
+Type inference: Without knowledge of the type space of                   Given a state, a fully connected CG factorizes the learner’s
+an OSBG, GPL assumes types can be represented as fixed-                  joint action value as a sum of individual utility terms,
+length vectors. Since type inference requires reasoning over             Qjβ (ajt |st ), and pairwise utility terms, Qj,k j    k
+                                                                                                                      δ (at , at |st ), un-
+agent’s behavior over an extended period of time, we use                 der the following Equation:
+LSTMs (Hochreiter & Schmidhuber, 1997) for type infer-
+                                                                                              X j j               X j,k j
+                                                                          Qβ,δ (st , at ) =       Qβ (at |st ) +       Qδ (at , akt |st ).
+ence. Our usage of LSTMs for type inference aligns with                                              j∈Nt                          j,k∈Nt
+previous approaches for creating fixed-length embeddings                                                                             j6=k
+of agents (Grover et al., 2018; Rabinowitz et al., 2018).                                                                            (5)
+                                                                         Qjβ (aj |s) intuitively represents j’s contribution towards the
+                              Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+learner’s returns by executing aj , while Qj,k   j   k
+                                            δ (a , a |s) de-        agents which may choose from n possible actions requires
+notes j and k’s contribution towards the learner’s returns by       the evaluation of nk joint-action terms, which number grows
+jointly choosing aj and ak .                                        exponentially with the increase in team size. By contrast, a
+                                                                    more efficient action-value computation arises from factor-
+We implement Qjβ (ajt |st ) and Qj,k   j    k
+                                   δ (at , at |st ) as multilayer   izing the joint action value network and using RFM-based
+perceptrons (MLPs) parameterized by β and δ to enable gen-
+                                                                    agent modeling networks. By substituting the joint-action
+eralization across states. We then enable MLPβ and MLPδ
+                                                                    value and agent models from Equation (5) and (8) into Equa-
+to model the contribution of agents’ individual and pairwise
+                                                                    tion (4), we obtain Equation (9) as our action-value estimate,
+joint actions towards the learner’s returns by providing type
+                                                                    which we prove in Appendix A:
+vectors of agents associated to each utility term, along with
+the the learner’s type vector as input to MLPβ and MLPδ .           Q̄(st , ai ) = Qiβ (ai |st )
+Given type vectors, θti and θtj , MLPβ outputs a vector with                       X j
+                                                                                        Qβ (aj |st ) + Qi,j i j               j
+                                                                                                                      
+a length of |A| that estimates Qjβ (aj |st ) for each possible                   +                      δ (a , a |st ) qζ,η (a |st )
+actions of j following:                                                        aj ∈Aj ,j6=i
+
+                                                                                       Qj,k
+                                                                                   X
+                                                                                            j   k            j            k
+                                                                               +        δ (a , a |st )qζ,η (a |st )qζ,η (a |st ).
+              Qjβ (aj |st ) = MLPβ (θtj , θti )(aj ).        (6)
+                                                                          aj ∈Aj ,ak ∈Ak ,j,k6=i
+
+On the other hand, instead of outputting the pairwise utility                                                                       (9)
+for the |A| × |A| possible pairwise actions of agent j and
+                                                                    Unlike Equation (4), Equation (9) is defined in terms of sin-
+k, MLPδ outputs an K × |A| matrix (K  |A|) given its
+                                                                    gular and pairwise action terms. In this case, the number of
+type vector inputs. Assuming a low-rank factorization of the
+                                                                    terms that need to be computed only increases quadratically
+pairwise utility terms, the output of MLPδ is subsequently
+                                                                    as the team size increases. The computation of the required
+used to compute Qj,k     j   k
+                    δ (at , at |st ) following:                     terms can be efficiently done in parallel with existing GNN
+                                                                    libraries (Wang et al., 2019).
+Qj,k   j   k                 j i T           k i        j    k
+  δ (at , at |st ) = (MLPδ (θt , θt ) MLPδ (θt , θt ))(at , at ).
+                                                             (7)    Model optimization: As the learner interacts with team-
+Previous work from Zhou et al. (2019) demonstrated that             mates during learning, it stores a dataset of states, agents’
+low-rank factorization enables scalable pairwise utility com-       actions, and rewards that it observed. Given a dataset
+putation even under thousands of possible pairwise actions.         of other agents’ actions it collected at different states,
+Finally note that MLPβ and MLPδ are shared between                  {(st , at )}D
+                                                                                t=1 , the agent modeling network is trained to esti-
+agents to encourage knowledge reuse for utility term com-           mate π(a−i          i
+                                                                               t |st , at ) through supervised learning by minimiz-
+putation, which importance to GPL’s superior performance            ing the negative log likelihood loss defined below:
+in open ad hoc teamwork is demonstrated in Section 5.6.
+                                                                                     Lζ,η = −log(qζ,η (a−i
+                                                                                                        t |st )).               (10)
+Agent modeling: GPL’s agent model assumes that other
+agents choose their actions independently, but models the           On the other hand, the collected dataset is also used to up-
+effect other agents have on an agent’s actions by using the         date GPL’s joint-action value network using value-based
+Relational Forward Model (RFM) architecture (Tacchetti              reinforcement learning. Unlike standard value-based ap-
+et al., 2019). RFMs are a class of recurrent graph neural           proaches (Mnih et al., 2015), we use the joint action value
+networks that have demonstrated high accuracy in predicting         as the predicted value. The loss function for the joint action
+agents’ next actions (Tacchetti et al., 2019). The RFM              value network is then defined as:
+receives agent type embeddings, θq , as its node input to
+                                                                                       1                                   2
+compute a fixed-length embedding, n̄, for each agent and                     Lβ,δ =      (Qβ,δ (st , at ) − y (rt , st+1 )) ,   (11)
+is parameterized by ζ. Let aj be the action taken by agent                             2
+j in the joint other agent-action a−i , we use each agent’s         with y(rt , st+1 ) being a target value which computation
+updated embedding to approximate π −i (a−i |s, θ−i ) as:            depends on the algorithm being used. We subsequently train
+                                      Y                             GPL with Q-Learning (GPL-Q) (Watkins & Dayan, 1992)
+                     qζ,η (a−i |s) =      qζ,η, (aj |s),            and Soft-Policy Iteration (GPL-SPI) (Haarnoja et al., 2018),
+                                     j∈−i                (8)        which produces a greedy and stochastic policy respectively.
+          qζ,η, (aj |s) = Softmax(MLPη (n̄j ))(aj ),                The target value computations of both methods are defined
+                                                                    as the following:
+with η being the parameter of an MLP that transforms the
+                                                                     yQL (rt , st+1 ) = rt + γmaxai Q̄ st+1 , ai ,
+                                                                                                                  
+updated agent embeddings.
+                                                                                                X
+                                                                                                   pSPI (ai |st+1 )Q̄ st+1 , ai ,
+                                                                                                                               
+Action value computation: Evaluating Equation (4) can                ySPI (rt , st+1 ) = rt + γ
+be inefficient in larger teams. For instance, a team of k                                          ai
+                             Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+where GPL-SPI’s policy uses the Boltzmann distribution,             ends when either an attacker reaches the fort, the learner
+                                                                    is shot by attackers, or 200 timesteps have elapsed. The
+                                  Q̄(st , ai )
+                                              
+          pSPI (ait |st ) ∝ exp                  ,  (12)            learner receives a reward of -3 for getting destroyed and 3
+                                      τ                             for destroying an attacker. On the other hand, a reward of
+with τ being the temperature parameter.                            -10 is given when an attacker reaches the fort and a reward of
+                                                                   10 when guards manage to defend the fort for 200 timesteps.
+                                                                   A cost of -0.1 is also given for shooting.
+5. Experimental Evaluation
+In this section, we describe our open ad hoc teamwork              5.2. Baselines
+experiments and demonstrate GPL’s performance in them.
+                                                                   We design different learners, which can be categorized into
+This is followed by a detailed analysis of concepts learned
+                                                                   single-agent value-based RL and MARL-based learners,
+by GPL’s joint action value model.
+                                                                   to compare against GPL. Note that baselines that do not
+                                                                   use GNNs require fixed-length inputs. To enable these ap-
+5.1. Multi-Agent Environments                                      proaches to handle changing number of agents in their obser-
+We conduct experiments in three fully observable multi-            vations, we impose an upper limit on the number of agents
+agent environments with different game complexity:                 in the environment and preprocess the observation to ensure
+                                                                   a fixed-length input by adding placeholder values. Details
+Level-based foraging (LBF): In LBF (Albrecht & Ra-                 of this preprocessing method is provided in Appendix E.2.
+mamoorthy, 2013), agents and objects with levels l ∈
+{1, 2, 3} are spread in a 8×8 grid world. The agents’ goal is      Single-agent RL baselines: In line with GPL, all baselines
+to collect all objects. Agent actions include actions to move      are trained with synchronous Q-learning (Mnih et al., 2016)
+along the four cardinal directions, stay still, or to collect      and take as input the type vectors from the type inference
+objects in adjacent grid locations. An object is collected         network, but differ in their action-value computation and
+if the sum of the levels of all agents involved in collecting      their use of an agent model. QL takes the concatenation of
+at the same time is equal to or higher than the level of the       type vectors as input into a feedforward network to estimate
+object. Upon collecting an object, every agent that collects       action values. GNN applies multi-head attention (Jiang
+an object is given a reward equal to the level of the object.      et al., 2019) to the type vectors and predicts action values
+An episode finishes if all available objects are collected or      based on the learner’s node embedding. The agent model
+after 50 timesteps.                                                used by QL-AM and GNN-AM is identical in architecture
+                                                                   and training procedure to GPL’s agent model. However, the
+Wolfpack: In Wolfpack (Leibo et al., 2017), a team of              predicted action probabilities are concatenated to the indi-
+hunter agents must capture moving prey in a 10 × 10 grid           vidual agent representations xt as explored by prior methods
+world. Episodes consist of 200 timesteps and prey are              (Tacchetti et al., 2019). An overview of baselines and their
+trained to avoid capture using DQN (Mnih et al., 2015).            components can be found in Table 1. These baselines will
+While the agents have full observability of the environment,       allow us to investigate what advantage GNNs provide in
+prey only observe a limited patch of grid cells ahead of them.     training and generalization performance, when action prob-
+Agents in this environment can move along the four cardinal        abilities help learning, which method of integrating action
+directions or stay still at their current location. To capture a   probabilities is most useful, and how GPL’s approach to
+prey, at least two hunters must form a pack by where every         computing action values compares to prior methods.
+pack members is located next to a prey’s grid location. Ev-
+ery hunter in a pack that captured a prey is given a reward        MARL baselines: While in principle our ad hoc teamwork
+of two times the size of the capturing pack. However, we           setting precludes joint training of agents via MARL (we only
+penalize agents by -0.5 for positioning themselves next to a       control a single learner agent and may also not know rewards
+prey without teammates positioned in other adjacent grids          of other agents), we use MARL approaches by assuming
+from the prey. Prey are respawned after they are captured.         that (during training) we control all teammates and all team-
+                                                                   mates are using the same reward function as the learner. We
+FortAttack: FortAttack (Deka & Sycara, 2020) is situated           compare with two MARL algorithms: MADDPG (Lowe
+on a two-dimensional plane where a team of attackers aim           et al., 2017) and DGN (Jiang et al., 2019). MADDPG is
+to reach a region, which we refer to as the fort, defended         a MARL algorithm for closed environments, while DGN
+by defenders whose aim is to prevent any attackers from            is a GNN-based MARL approach designed for joint train-
+reaching the fort. Our learning agent assumes the role of a        ing in open environments. For evaluation in open ad hoc
+defender. Agents are equipped with actions to move along           teamwork, after MARL training completes, we select one
+the four cardinal directions, rotate, and shoot any opposing       of the jointly trained agents and measure its performance
+team members located in a triangular shooting range defined        when interacting with the teammate types used in our ad
+by the agent’s angular orientation and location. An episode
+                             Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+hoc teamwork settings (see Sec. 5.4).                             bility in terms of number of agents, we impose different
+                                                                  limits to the maximum team size resulting from the open
+                                                                  process for training and testing. For testing, we increase the
+Table 1. Types of ablations based on value network architecture
+and their use of agent modelling.
+                                                                  upper limit on team size to expose the learner against team
+     Models       GNN Agent Model Joint Action-Value              configurations it has never encountered before. In all three
+       QL                                                         environments, we specifically limit the team size to three
+     QL-AM                      X                                 agents during training time and increase this limit to five
+      GNN          X                                              agents for testing. Since FortAttack has two opposing teams
+   GNN-AM          X            X                                 in its environment, these team size restriction is imposed on
+     GPL-Q         X            X                X
+                                                                  both teams.
+    GPL-SPI        X            X                X
+
+                                                                  5.5. Open Ad Hoc Teamwork Results
+5.3. Data Collection for Training
+                                                                  Figure 2 shows the training performance of GPL-based ap-
+While type inference requires reasoning over consecutive          proaches and the baselines. It shows that MARL-based
+observations, we want to avoid increasing the storage and         approaches produce similar or worse performance than our
+computational resources required for training GPL and base-       worst performing single-agent RL baseline during train-
+lines. Therefore, we collect experiences across multiple          ing. While MARL policies performs better alongside other
+environments in parallel instead of using a single environ-       jointly trained agents, it generalizes poorly against the ad
+ment and storing experiences in an experience replay. This        hoc teamwork teammates that cannot be jointly trained with
+resembles the data collection process of A3C (Mnih et al.,        MARL. For completeness, we show MARL learner’s im-
+2016). However, we collect experiences synchronously as           proved performance when interacting with other jointly
+opposed to A3C’s asynchronous data collection process.            trained agents in Appendix F.
+                                                                  Since results between GPL-Q and GPL-SPI are similar, we
+5.4. Experimental Setup                                           use GPL to refer to both in comparison with baselines. Fig-
+We construct environments for open ad hoc teamwork by             ure 2 also shows that GPL significantly outperforms other
+creating a diverse set of teammate types for each environ-        baselines that use agent models, such as QL-AM and GNN-
+ment. Agent types are designed such that a learner must           AM, in terms of training performance. Despite both being
+adapt its policy to achieve optimal return when interacting       based on GNNs, GPL outperforming GNN-AM highlights
+with the type. In LBF and Wolfpack, each type’s policy is         GPL’s action-value computation method over GNN-AM. As
+implemented either via different heuristics or reinforcement      further indicated by the similarity in performance between
+learning-based policies. We vary the teammate policies in         QL/QL-AM or GNN/GNN-AM, concatenating action prob-
+terms of their efficiency in executing a task and their roles     abilities towards observations also does not improve training
+in a team. Further details of the teammate policies and           performance in most cases, which aligns with previous re-
+diversity analysis for Wolfpack and LBF are provided in           sults from Grover et al. (2018) and Tacchetti et al. (2019).
+Appendix B.4. We use pretrained policies provided by Deka         The reason GPL significantly outperforms others in train-
+& Sycara (2020) for FortAttack.                                   ing is because the joint-action model learns to disentangle
+                                                                  the effects of other agents’ actions. We further elaborate
+We simulate openness by creating an open process that             on GPL’s superiority over other methods in terms of train-
+determines how agents enter and leave during episodes,            ing performance through an analysis over its resulting joint
+for both training and testing. In LBF and Wolfpack, the           action value estimates which we provide in Section 5.6.
+number of timesteps an agent can exist in the environment
+is determined by uniformly sampling from a certain range          The generalization performance of GPL and the baselines is
+of integers. After staying for the predetermined number           provided in Table 2. The way GPL, GNN and GNN-AM out-
+of timesteps, agents are removed from the environment.            perform single-agent RL baselines in generalization for LBF
+For FortAttack, agents are removed once they are shot by          despite having similar training performances shows that
+opponents. After being removed, agents can reenter the            GNNs are important components for generalizing between
+environment after a specific period of waiting time. The type     different open processes. Furthermore, GPL outperforming
+of an agent entering an environment is uniformly sampled          GNN-AM’s generalization capability shows that using agent
+from all available types. Further details of the open process     models for action-value computation using Equation (9) also
+for each environments are provided in Appendix E.1.               plays a role in improving generalization capability between
+                                                                  open processes. In QL-AM and GNN-AM, the value net-
+After every 160000 global training timesteps, GPL and base-       works must learn a model that integrates the predicted action
+lines’ are stored and evaluated based on their achieved return    probabilities to compute good action-value estimates, which
+under the open process. To evaluate generalization capa-
+                                                                                Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+                                          Average Training Return in LBF                                                                          Average Training Return in Wolfpack                                                               Average Training Return in FortAttack
+                                                                                           GPL-Q                                                                                                  GPL-Q                                                                                                GPL-Q
+                                                                                           GPL-SPI                                                                                                GPL-SPI                                                                                              GPL-SPI
+                             4
+                                                                                           QL                                                                                                     QL                                                                                                   QL
+                                                                                                                                   30
+                                                                                           QL-AM                                                                                                  QL-RFM                                 15                                                            QL-AM
+                                                                                           GNN                                                                                                    GNN                                                                                                  GNN
+
+
+
+
+Average Return per Episode                                                                           Average Return per Episode                                                                             Average Return per Episode
+                                                                                           GNN-AM                                                                                                 GNN-RFM                                                                                              GNN-AM
+                             3                                                             MADDPG                                                                                                 MADDPG                                                                                               MADDPG
+                                                                                           DGN                                     20                                                             DGN                                    10                                                            DGN
+
+
+
+
+                             2                                                                                                                                                                                                            5
+                                                                                                                                   10
+
+
+                                                                                                                                                                                                                                          0
+                             1                                                                                                      0
+
+                                                                                                                                                                                                                                         −5
+
+                             0                                                                                                    −10
+
+                                 0   5   10     15      20      25         30    35   40                                                0   5      10      15      20      25      30   35   40                                               0    20          40           60              80   100
+                                              Total Steps (x160000)                                                                                     Total Steps (x160000)                                                                              Total Steps (x160000)
+
+
+
+                                 (a) Results in Level-based foraging                                                                            (b) Results in Wolfpack                                                                           (c) Results in FortAttack
+
+Figure 2. Open ad hoc teamwork results (training): Average and 95% confidence bounds of GPL & baseline returns during training
+(up to 3 agents in a team for LBF, Wolfpack, and attacker & defender teams in FortAttack). For each algorithm, training is done using
+eight different seeds and the resulting models are saved and evaluated every 160000 global steps.
+
+
+Table 2. Open ad hoc teamwork results (testing): Average and 95% confidence bounds of GPL and baselines during testing (up to 5
+agents in a team for LBF, Wolfpack, and attacker & defender teams in FortAttack). For each algorithm, data was gathered by running the
+greedy policy resulting from the eight value networks stored at the checkpoint which achieved the highest average performance during
+training. The asterisk indicates significant difference in returns compared to the single-agent RL baselines.
+  Env.         GPL-Q           GPL-SPI             QL            QL-AM           GNN         GNN-AM            DGN       MADDPG
+  LBF        2.32±0.22       2.40±0.16*        1.41±0.14        1.22±0.29    2.07±0.13       1.80±0.11      0.64 ± 0.9   0.91 ± 0.10
+  Wolf. 36.36±1.71* 37.61±1.69* 20.57±1.95 14.24±2.65 8.88±1.57 30.87±0.95                                 2.18 ± 0.66  19.20 ± 2.22
+  Fort.    14.20±2.42* 16.82±1.92* -3.51±0.60                  -3.51±1.51 7.01±1.63          8.12±0.74     -5.98 ± 0.82 -4.83 ± 1.24
+
+
+may not generalize well to teams with previously unseen                                                                                                                    as:
+sizes. By contrast, GPL uses predicted action probabilities                                                                                                                                                 P                                 j,k j          k
+                                                                                                                                                                                                                                          ak Qδ (a = shoot, a |s)
+as weights in its action-value computation following Equa-                                                                                                                                   Q̄j,k =                                                k
+                                                                                                                                                                                                                                                                  .                                    (13)
+                                                                                                                                                                                                                                                  |A |
+tion (9), which is proven in Appendix A to be correct for
+any team size. Finally, the low generalization performance
+                                                                                                                                                                           Q̄j,k is derived from GPL’s pairwise utility terms,
+of MARL-based baselines naturally follows from their low
+                                                                                                                                                                           Qj,k    j   k
+                                                                                                                                                                              δ (a , a |s), and can be viewed as GPL’s estimate of
+performance during training.
+                                                                                                                                                                           agent j’s average contribution towards the learner when j
+                                                                                                                                                                           decides to shoot k, averaged over all possible ak . There-
+5.6. Joint Action Value Analysis
+                                                                                                                                                                           fore, this shows that GPL-Q’s return strongly correlates with
+We investigate how the joint action value model enables                                                                                                                    the pairwise utility terms assigned by the joint-action value
+GPL-Q to significantly outperform the single-agent RL base-                                                                                                                model when a defender chooses to shoot an attacker inside
+lines during training in FortAttack, which is our most com-                                                                                                                its shooting range.
+plex environment. For completeness, a similar analysis for                                                                                                                 Rather than merely being strongly correlated to GPL’s re-
+Wolfpack is provided in Appendix H.                                                                                                                                        turns, we now elaborate why the pairwise utility terms pro-
+When comparing the resulting behavior from learning with                                                                                                                   duced by the joint-action value model is the main reason
+GPL-Q and baselines, Figure 3a shows that GPL-Q’s shoot-                                                                                                                   behind GPL-based learner’s higher final returns. Consider
+ing accuracy improves at a faster rate than baselines and                                                                                                                  when M LPδ increases its pairwise utility terms associated
+eventually converges at a higher value. Investigating the                                                                                                                  with shooting attackers inside a defender’s shooting range.
+way GPL components encourage faster and better shoot-                                                                                                                      Since the learner itself is a defender, M LPδ will also in-
+ing performance may therefore highlight why GPL-based                                                                                                                      crease values of shooting-related pairwise utility terms when
+approaches outperform the baselines. We specifically inves-                                                                                                                an attacker is inside the learner’s shooting range. This en-
+tigate several shooting-related metrics derived from GPL’s                                                                                                                 courages the learner to get attackers inside its shooting range
+component, average their values over 480000 sample states                                                                                                                  and shoot more. Eventually, the learner achieves a higher re-
+gathered at different training checkpoints, and measure their                                                                                                              turn and Q̄j,k becomes strongly correlated with the learner’s
+correlation coefficient with GPL’s average return. Among                                                                                                                   return when j is a defender and k is an attacker inside j’s
+all metrics, the highest Pearson correlation coefficient of                                                                                                                shooting range. Furthermore, Figure 3b also shows that
+0.85 is attained by Q̄j,k when j is a defender and k is an                                                                                                                 M LPδ learns to associate negative values when defenders
+attacker in j’s shooting range. Q̄j,k is specifically defined                                                                                                              enter an attacker’s shooting range, which enables the learner
+                                                                                                                                                                           to learn to avoid the shooting range of attackers.
+                                                                                     Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+                                                             Average Shooting Accuracy in FortAttack during Testing
+                                                                                                                            3                                                                                                                   1
+                                                            GPL-Q
+                                                            QL
+                                                                                                                                                                                Mean Q̄j,k from Pairwise Utility Terms
+                                                            QL-AM
+
+
+
+
+          Average Shooting Accuracy per Episode
+                                                  0.4       GNN                                                                                                                                                                30
+                                                                                                                                                              0.5
+                                                            GNN-AM
+
+                                                                                                                                                              0.0                                                              10
+
+                                                  0.3
+                                                                                                                                                             −0.5                                                              −10
+
+
+
+                                                                                                                                             Mean of Q̄j,k                                                                            Returns
+                                                                                                                                                             −1.0                                                              −30
+                                                  0.2
+                                                                                                                                                             −1.5                                                              −50
+                                                                                                                                                                        1) In defender shooting range
+                                                                                                                                                             −2.0       2) Not in defender shooting range                      −70
+                                                  0.1
+                                                                                                                            4                                           3) In attacker shooting range                                           2
+                                                                                                                                                             −2.5
+                                                                                                                                                                        4) Not in attacker shooting range                      −90
+                                                                                                                                                                        Returns
+                                                  0.0                                                                                                        −3.0
+                                                                                                                                                                                                                               −110
+                                                                                                                                                                    0           20            40            60      80   100
+                                                        0            20         40           60          80           100
+                                                                                                                                                                                          Total Steps (x160000)
+                                                                             Total Steps (x160000)
+
+
+                                                  (a) Shooting accuracy in FortAttack                                       (b) Evolution of shooting metrics derived from GPL’s pairwise utilites.
+
+Figure 3. Shooting-related metrics for FortAttack: (a) For GPL-Q and the baselines, we measure the percentage of times the learner
+successfully shot an attacker at each checkpoint during FortAttack training (cf. Section 5.4). (b) We measure Q̄j,k , which is a metric
+derived from GPL-Q’s pairwise utility terms that represents GPL-Q’s estimate of the contribution towards the returns resulting from agent
+j shooting an opponent agent, k. Each line in the plot corresponds to a different scenario in which the pairwise utility term is measured.
+Lines 1 and 2 represent Q̄j,k when j is a defender and k is an attacker inside (1) or outside (2) j’s shooting range. Lines 3 and 4 contrast
+the value of Q̄j,k when j is an attacker and k is a defender inside (3) or outside (4) j’s shooting range. To provide an example pairwise
+interaction where Q̄j,k is computed from for each line, we visualize four sample pairwise interactions in FortAttack (white line in black
+boxes). Each black box is numbered after the line plot it corresponds to. The fort is represented by the blue half circle, attackers by red
+circles, defenders by green circles, the learner is marked with a white dot, and shooting ranges are indicated with dashed view cones. The
+matrices represent the joint action space for an attacker and defender, where the yellow marked fields refer to the actions that are averaged
+over to compute Q̄j,k shown in the middle plot. This figure shows that the learner becomes increasingly aware of the benefits of shooting
+attackers inside a defender’s shooting range and the negative consequences of a defender approaching an attacker’s shooting range as
+training progresses, which causes GPL-Q’s strong performance.
+
+
+Unlike GPL, we show in Appendix I that baselines that are                                                                           that our learned policies can robustly adapt to dynamically
+not equipped with M LPδ will not be able to learn these                                                                             changing teams. We empirically show that GPL’s success
+important concepts, which lead to their significantly worse                                                                         can be attributed to its ability to learn meaningful concepts
+performances. Specifically, learning to shoot with the single-                                                                      to explain the effects of other agents’ actions on the learning
+agent RL baselines requires increasing the value network’s                                                                          agent’s returns. This enables GPL to produce action-values
+estimate on shooting when an attacker ventures inside the                                                                           that lead to significantly better training and generalization
+learner’s shooting range. In turn, agents can only increase                                                                         performances than various baselines.
+the action value estimate of shooting after experiencing the
+                                                                                                                                    An interesting direction for future work is related to exten-
+positive rewards from successfully shooting an opposing
+                                                                                                                                    sions towards environments with partial observability and/or
+team’s agent. However, this can be especially difficult dur-
+                                                                                                                                    continuous action spaces. On the other hand, GPL’s restric-
+ing exploration since it requires the learner to position itself
+                                                                                                                                    tive assumption that the learner’s joint action value function
+at the right distance and orientation from an attacker. Even
+                                                                                                                                    must factorize following a fully connected CG can degrade
+if the learner manages to get to the right distance from an
+                                                                                                                                    the learner’s returns for environments with certain reward
+attacker, a trained attacker can shoot a suboptimal learner
+                                                                                                                                    functions (Castellini et al., 2019). Thus, automatically learn-
+instead if it does not orient itself properly or if it does not
+                                                                                                                                    ing the most appropriate joint action value factorization
+shoot the attacker first.
+                                                                                                                                    through CG graph structure learning can potentially im-
+                                                                                                                                    prove GPL’s computational efficiency and return estimates.
+6. Conclusion and Future Work
+This work addresses the challenging problem of open ad                                                                              Acknowledgement
+hoc teamwork, in which the goal is to design an autonomous
+                                                                                                                                   This research was financially supported in part by: the Uni-
+agent capable of robust teamwork under dynamically chang-
+                                                                                                                                   versity of Edinburgh Enlightenment Scholarship (A.R.);
+ing team composition without pre-coordination mechanisms
+                                                                                                                                   the Hybrid Intelligence Center, funded by the Netherlands
+such as joint training. Our proposed algorithm GPL uses
+                                                                                                                                   Organisation for Scientific Research under grant number
+coordination graphs to learn joint action-value functions that
+                                                                                                                                   024.004.022 (N.H.); the UK EPSRC Centre for Doctoral
+model the effects of other agents’ actions towards the learn-
+                                                                                                                                   Training in Robotics and Autonomous Systems (F.C.); and
+ing agent’s returns, along with a GNN-based model trained
+                                                                                                                                   the US Office of Naval Research (ONR) grant N00014-20-
+to predict actions of other teammates. We empirically tested
+                                                                                                                                   1-2390 (S.A).
+our approach in three multi-agent environments showing
+                            Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+References                                                         on Artificial Intelligence, volume 34, pp. 7095–7102,
+                                                                   2020.
+Agmon, N. and Stone, P. Leading ad hoc agents in joint
+  action settings with multiple teammates. In Proc. of 12th      Christianos, F., Schäfer, L., and Albrecht, S. V. Shared expe-
+ Int. Conf. on Autonomous Agents and Multiagent Systems            rience actor-critic for multi-agent reinforcement learning.
+ (AAMAS 2012), June 2012.                                          In 34th Conference on Neural Information Processing
+                                                                   Systems, 2020.
+Albrecht, S. V. and Ramamoorthy, S. A game-theoretic
+  model and best-response learning method for ad hoc co-         Deka, A. and Sycara, K. Natural emergence of hetero-
+  ordination in multiagent systems. In Proceedings of the          geneous strategies in artificially intelligent competitive
+  2013 International Conference on Autonomous Agents               teams. arXiv preprint arXiv:2007.03102, 2020.
+  and Multi-Agent Systems, pp. 1155–1156, 2013.
+                                                                 Foerster, J., Farquhar, G., Afouras, T., Nardelli, N., and
+Albrecht, S. V. and Stone, P. Reasoning about hypothetical         Whiteson, S. Counterfactual multi-agent policy gradi-
+  agent behaviours and their parameters. In Proceedings of         ents. In Proceedings of the AAAI Conference on Artificial
+  the 16th International Conference on Autonomous Agents           Intelligence, volume 32, 2018.
+  and Multiagent Systems, pp. 547–555, 2017.
+                                                                 Grover, A., Al-Shedivat, M., Gupta, J., Burda, Y., and Ed-
+Albrecht, S. V. and Stone, P. Autonomous agents modelling          wards, H. Learning policy representations in multiagent
+  other agents: A comprehensive survey and open problems.          systems. In International Conference on Machine Learn-
+  Artificial Intelligence, 258:66–95, 2018.                        ing, pp. 1802–1811, 2018.
+Albrecht, S. V., Crandall, J. W., and Ramamoorthy, S. Belief
+                                                                 Guestrin, C., Lagoudakis, M. G., and Parr, R. Coordinated
+  and truth in hypothesised behaviours. Artificial Intelli-
+                                                                   reinforcement learning. In Proceedings of the Nineteenth
+  gence, 235:63–94, 2016.
+                                                                   International Conference on Machine Learning, pp. 227–
+Albrecht, S. V., Brewitt, C., Wilhelm, J., Gyevnar, B., Eiras,     234, 2002.
+  F., Dobre, M., and Ramamoorthy, S. Interpretable goal-
+                                                                 Haarnoja, T., Zhou, A., Abbeel, P., and Levine, S. Soft actor-
+  based prediction and planning for autonomous driving.
+                                                                   critic: Off-policy maximum entropy deep reinforcement
+  In IEEE International Conference on Robotics and Au-
+                                                                   learning with a stochastic actor. In International Con-
+  tomation (ICRA), 2021.
+                                                                   ference on Machine Learning, pp. 1861–1870. PMLR,
+Barrett, S. and Stone, P. Cooperating with unknown team-           2018.
+  mates in complex domains: A robot soccer case study of
+  ad hoc teamwork. In Proceedings of the Twenty-Ninth            Hamilton, W., Ying, Z., and Leskovec, J. Inductive repre-
+  AAAI Conference on Artificial Intelligence, January 2015.        sentation learning on large graphs. In Advances in neural
+                                                                   information processing systems, pp. 1024–1034, 2017.
+Barrett, S., Stone, P., and Kraus, S. Empirical evaluation of
+  ad hoc teamwork in the pursuit domain. In Proc. of 11th        He, H., Boyd-Graber, J., Kwok, K., and Daumé III, H.
+  Int. Conf. on Autonomous Agents and Multiagent Systems           Opponent modeling in deep reinforcement learning. In
+  (AAMAS), May 2011.                                               International Conference on Machine Learning, pp. 1804–
+                                                                  1813, 2016.
+Barrett, S., Rosenfeld, A., Kraus, S., and Stone, P. Mak-
+  ing friends on the fly: Cooperating with new teammates.        Hochreiter, S. and Schmidhuber, J. Long short-term memory.
+  Artificial Intelligence, 242:132–171, 2017.                      Neural computation, 9(8):1735–1780, 1997.
+
+Böhmer, W., Kurin, V., and Whiteson, S. Deep coordina-          Jiang, J., Dun, C., Huang, T., and Lu, Z. Graph convolu-
+  tion graphs. In International Conference on Machine               tional reinforcement learning. In International Confer-
+  Learning, pp. 980–991. PMLR, 2020.                                ence on Learning Representations, 2019.
+
+Castellini, J., Oliehoek, F. A., Savani, R., and Whiteson, S.    Leibo, J. Z., Zambaldi, V., Lanctot, M., Marecki, J., and
+  The representational capacity of action-value networks           Graepel, T. Multi-agent reinforcement learning in se-
+  for multi-agent reinforcement learning. In Proceedings of        quential social dilemmas. In Proceedings of the 16th
+  the 18th International Conference on Autonomous Agents           Conference on Autonomous Agents and MultiAgent Sys-
+  and MultiAgent Systems, pp. 1862–1864, 2019.                     tems, pp. 464–473, 2017.
+
+Chen, S., Andrejczuk, E., Cao, Z., and Zhang, J. Aateam:         Lowe, R., Wu, Y. I., Tamar, A., Harb, J., Abbeel, O. P.,
+  Achieving the ad hoc teamwork by employing the atten-            and Mordatch, I. Multi-agent actor-critic for mixed
+  tion mechanism. In Proceedings of the AAAI Conference            cooperative-competitive environments. In Advances in
+                            Towards Open Ad Hoc Teamwork Using Graph-based Policy Learning
+
+  neural information processing systems, pp. 6379–6390,            N., Leibo, J. Z., Tuyls, K., and Graepel, T. Value-
+  2017.                                                            decomposition networks for cooperative multi-agent
+                                                                   learning based on team reward. In Proceedings of the
+Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness,        17th International Conference on Autonomous Agents
+ J., Bellemare, M. G., Graves, A., Riedmiller, M., Fidje-          and MultiAgent Systems, pp. 2085–2087, 2018.
+ land, A. K., Ostrovski, G., et al. Human-level control
+ through deep reinforcement learning. Nature, 518(7540):         Tacchetti, A., Song, H. F., Mediano, P. A. M., Zam-
+ 529–533, 2015.                                                    baldi, V. F., Kramár, J., Rabinowitz, N. C., Graepel, T.,
+                                                                   Botvinick, M., and Battaglia, P. W. Relational forward
+Mnih, V., Badia, A. P., Mirza, M., Graves, A., Lillicrap,          models for multi-agent learning. In 7th International
+ T., Harley, T., Silver, D., and Kavukcuoglu, K. Asyn-             Conference on Learning Representations, 2019.
+ chronous methods for deep reinforcement learning. In
+ International conference on machine learning, pp. 1928–         Tambe, M. Towards flexible teamwork. Journal of Artificial
+ 1937, 2016.                                                       Intelligence Research, 7:83–124, 1997.
+
+Papoudakis, G., Christianos, F., Rahman, A., and Albrecht,       Tampuu, A., Matiisen, T., Kodelja, D., Kuzovkin, I., Korjus,
+  S. V. Dealing with non-stationarity in multi-agent deep          K., Aru, J., Aru, J., and Vicente, R. Multiagent cooper-
+  reinforcement learning. arXiv preprint arXiv:1906.04737,         ation and competition with deep reinforcement learning.
+  2019.                                                            PloS one, 12(4), 2017.
+
+Rabinowitz, N. C., Perbet, F., Song, H. F., Zhang, C., Eslami,   Wang, M., Yu, L., Zheng, D., Gan, Q., Gai, Y., Ye, Z., Li, M.,
+  S. M. A., and Botvinick, M. Machine theory of mind.             Zhou, J., Huang, Q., Ma, C., Huang, Z., Guo, Q., Zhang,
+  In Proceedings of the 35th International Conference on          H., Lin, H., Zhao, J., Li, J., Smola, A. J., and Zhang, Z.
+  Machine Learning, pp. 4215–4224, 2018.                          Deep graph library: Towards efficient and scalable deep
+                                                                  learning on graphs. ICLR Workshop on Representation
+Raileanu, R., Denton, E., Szlam, A., and Fergus, R. Mod-          Learning on Graphs and Manifolds, 2019.
+  eling others using oneself in multi-agent reinforcement
+  learning. In Proceedings of the 35th International Con-        Watkins, C. J. and Dayan, P. Q-learning. Machine learning,
+  ference on Machine Learning, pp. 4254–4263, 2018.               8(3-4):279–292, 1992.
+
+Rashid, T., Samvelyan, M., de Witt, C. S., Farquhar, G.,         Zhou, M., Chen, Y., Wen, Y., Yang, Y., Su, Y., Zhang,
+  Foerster, J. N., and Whiteson, S. QMIX: monotonic value          W., Zhang, D., and Wang, J. Factorized q-learning for
+  function factorisation for deep multi-agent reinforcement        large-scale multi-agent systems. In Proceedings of the
+  learning. In Proceedings of the 35th International Con-          First International Conference on Distributed Artificial
+  ference on Machine Learning, pp. 4292–4301, 2018.                Intelligence, pp. 1–7, 2019.
+
+Ravula, M., Alkobi, S., and Stone, P. Ad hoc teamwork with
+  behavior switching agents. In International Joint Confer-
+  ence on Artificial Intelligence (IJCAI), August 2019.
+
+Rummery, G. A. and Niranjan, M. On-line Q-learning
+  using connectionist systems, volume 37. University of
+  Cambridge, Department of Engineering Cambridge, UK,
+ 1994.
+
+Stone, P., Kaminka, G. A., and Rosenschein, J. S. Leading
+  a best-response teammate in an ad hoc team. In Agent-
+  mediated electronic commerce. Designing trading strate-
+  gies and mechanisms for electronic markets, pp. 132–146.
+  Springer, 2009.
+
+Stone, P., Kaminka, G., Kraus, S., and Rosenschein, J. Ad
+  hoc autonomous agent teams: Collaboration without pre-
+  coordination. In Proceedings of the AAAI Conference on
+  Artificial Intelligence, volume 24, 2010.
+
+Sunehag, P., Lever, G., Gruslys, A., Czarnecki, W. M.,
+  Zambaldi, V. F., Jaderberg, M., Lanctot, M., Sonnerat,
+

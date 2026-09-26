@@ -1,0 +1,587 @@
+                                                    Learning to Transfer Role Assignment Across Team Sizes
+                                                                           Dung Nguyen                                                                 Phuoc Nguyen
+                                                                    A2 I2 , Deakin University                                                      A2 I2 , Deakin University
+                                                                      Geelong, Australia                                                             Geelong, Australia
+                                                                  dung.nguyen@deakin.edu.au                                                     phuoc.nguyen@deakin.edu.au
+
+                                                                       Svetha Venkatesh                                                                 Truyen Tran
+                                                                    A2 I2 , Deakin University                                                      A2 I2 , Deakin University
+
+
+
+
+arXiv:2204.12937v1 [cs.LG] 17 Apr 2022
+                                                                      Geelong, Australia                                                             Geelong, Australia
+                                                               svetha.venkatesh@deakin.edu.au                                                    truyen.tran@deakin.edu.au
+                                         ABSTRACT
+                                         Multi-agent reinforcement learning holds the key for solving com-
+                                         plex tasks that demand the coordination of learning agents. How-
+                                         ever, strong coordination often leads to expensive exploration over
+                                         the exponentially large state-action space. A powerful approach is
+                                         to decompose team works into roles, which are ideally assigned
+                                         to agents with the relevant skills. Training agents to adaptively
+                                         choose and play emerging roles in a team thus allows the team
+                                         to scale to complex tasks and quickly adapt to changing environ-
+                                         ments. These promises, however, have not been fully realised by
+                                         current role-based multi-agent reinforcement learning methods as
+                                         they assume either a pre-deﬁned role structure or a ﬁxed team size.                      Figure 1: A StarCraft II scenario in which the agents need to
+                                         We propose a framework to learn role assignment and transfer                             play diﬀerent roles to explore good policies. Some marines
+                                         across team sizes. In particular, we train a role assignment network                     need to defend own campsites (bottom) under attack, en-
+                                         for small teams by demonstration and transfer the network to lar-                        abling their allies to attack the opponent’s campsites (top).
+                                         ger teams, which continue to learn through interaction with the
+                                         environment. We demonstrate that re-using the role-based credit
+                                         assignment structure can foster the learning process of larger rein-                     as part of the environment [18, 32], but may run into the non-
+                                         forcement learning teams to achieve tasks requiring diﬀerent roles.                      stationary problem [35]. Centralised Training Decentralised Exe-
+                                         Our proposal outperforms competing techniques in enriched role-                          cution (CTDE) [13, 22, 25] is a middle ground assuming that the
+                                         enforcing Prey-Predator games and in new scenarios in the Star-                          agents act on their own after being trained together. The essence
+                                         Craft II Micro-Management benchmark.                                                     of CTDE is to learn to assign credit to individual agents when the
+                                                                                                                                  whole team is trained to maximise collective rewards. There has
+                                         KEYWORDS                                                                                 been a growing eﬀort to solve CTDE [9, 10, 16, 17, 25, 34], but
+                                         Multi-agent Reinforcement Learning; Centralised Training Decent-                         these are typically limited to small teams of agents since it is pro-
+                                         ralised Execution; Roles; SMAC                                                           hibitive to explore the joint state-action space of large teams dur-
+                                                                                                                                  ing training. Learning with a large number of agents remains very
+                                         ACM Reference Format:                                                                    challenging [28, 35].
+                                         Dung Nguyen, Phuoc Nguyen, Svetha Venkatesh, and Truyen Tran. 2022.                         A solution found to be eﬀective in human teams is to decom-
+                                         Learning to Transfer Role Assignment Across Team Sizes. In Proc.of the
+                                                                                                                                  pose a large team task into sub-tasks and roles. Under this de-
+                                         21st International Conference on Autonomous Agents and Multiagent Systems
+                                         (AAMAS 2022), Online, May 9–13, 2022, IFAAMAS, 9 pages.
+                                                                                                                                  composition, each team member assumes one or more roles as-
+                                                                                                                                  sociated with manageable sub-tasks [2]. Training a large team is
+                                                                                                                                  therefore feasible as each individual needs to explore only a con-
+                                         1     INTRODUCTION                                                                       strained state-action space deﬁned by the assigned roles. However,
+                                         Learning to work as a team is essential to achieve larger collective                     in practice, the role structures are not always well-deﬁned a priori
+                                         goals in solving complex tasks [4, 40]. However, partial observa-                        or are changing due to the task or team dynamics. In these circum-
+                                         tions and expensive team coordination may prevent agents from                            stances, members need to assume emerging roles and proactively
+                                         having full knowledge of the environment and all others operating                        play the chosen roles when they see ﬁt [34]. Learning to play emer-
+                                         on it [23, 35]. Early work avoided this diﬃculty by learning inde-                       gent roles essentially boils down to how to assign credits to roles
+                                         pendent single-agent policies and treating other learning agents                         followed by assignments to the agents who play the roles [35].
+                                                                                                                                     An orthogonal approach in solving diﬃcult tasks is to learn
+                                         Proc.of the 21st International Conference on Autonomous Agents and Multiagent Systems    with a curriculum in that we start from a small, easy-to-learn task,
+                                         (AAMAS 2022), P. Faliszewski, V. Mascardi, C. Pelachaud, M.E. Taylor (eds.), May 9–13,
+                                         2022, Online. © 2022 International Foundation for Autonomous Agents and Multiagent       then progressively expand the reach to larger tasks [7, 19, 20]. For
+                                         Systems (www.ifaamas.org). All rights reserved.                                          example, it would be learning from a small, simple environment
+ﬁrst, and gradually training in larger, more complex environments.
+In multi-agent settings, it could be progressing from training a
+small team where coordination is easy and cheap, then transferring
+the learned skills to the next phase of training with a larger team
+where coordination is diﬃcult and expensive [36]. This curriculum
+strategy demands a new kind of models that can work across team
+sizes.
+   In this work, we seek to bring these two approaches into a uni-
+ﬁed learning framework for CTDE, which consists of (a) team learn-
+ing to assign credit to roles, and (b) transferring models (both credit
+assignment and individual policy) across varying team sizes. We
+start from a popular CTDE framework known as QMIX [25], which
+has a mixing network to aggregate 𝑄-value functions of individual
+agents into the team’s 𝑄-value function. The mixing network is
+generated by a hyper-network [11] that takes as input the state, and
+thus assuming a ﬁxed team size. Lifting this constraint, we design a      Figure 2: Our architecture to train a team of reinforcement
+new mixing network and a new way to generate the network from             learning agents in Centralised Training Decentralised Exe-
+observations local to each agent rather than from the entire state        cution (CTDE) setting. Using the observations of agents in
+of the system. The design of the mixing network permits (a) dy-           the ﬁrst hyper-network enables the ability to transfer the
+namic credit assignments to hidden roles, and (b) role assignments        pre-trained model across team sizes. There is no gradient
+to individual agents. At each time step, the network estimates the        passing through the dash lines.
+probability that an agent will contribute to a role, collects the 𝑄-
+function values attributed to the role, and weights the role’s con-
+tribution to the total team’s 𝑄-function. Crucially, our generating       2 PRELIMINARIES
+hyper-network is transferable across teams by permitting varying              Cooperative Reinforcement Learning Agents. We consider a fully
+team sizes to borrow pre-trained models. This enables faster train-       cooperative multi-agent task described as a decentralised Partial
+ing in a new setting and curriculum learning from easy to complex         Observability Markov Decision Process (Dec-POMDP) [21] 𝐺 =
+scenarios.                                                                hN, S, A, P, 𝑅, Ω, O, 𝛾i in which N is the set of agents, 𝑠 ∈ S is
+   To further encourage the role diﬀerentiation and assignment            the true state of the environment, O is the observation space, A
+among agents, we introduce role-induced losses. For concreteness,         is the action space, Ω : S ↦−→ O is a mapping from state space to
+we study a loss associated with the reward horizons, as encapsu-          the observation space, P : S × A |N | × S ↦−→ [0, 1] is the state
+lated in the discount factors in the MDP. This is motivated by
+                                                                          transition function, 𝑅 : S × A |N | ↦−→ R is the reward function,
+the fact that we humans engage in playing a long-term rewar-
+                                                                          and 𝛾 ∈ [0, 1] is the discounted factor. At each time step 𝑡, an
+ded role for the whole team even when we know the role has                                                        (𝑡)
+no short-term individual beneﬁt. We evaluate our proposed frame-          agent 𝑖 observes its local observation 𝑜𝑖 ∈ O then decides its ac-
+                                                                                (𝑡)
+work on two suites of multi-agent reinforcement learning (MARL)           tion 𝑎𝑖 ∈ A. All agents in the environment form a joint-action
+experiments, highlighting the need for curriculum learning when           𝑎 ∈ A |N | .
+solving strongly cooperative CTDE tasks. The ﬁrst suite consists
+of enriched Prey-Predator games, where agents must learn to re-              Centralised Training and Decentralised Execution (CTDE). In this
+cognise, pick and play an emergent role for the team to succeed.          setting, we train a team of agents together to maximise team re-
+Visual examination clearly shows that (a) the roles emerge, and           wards resulting from individuals executing their own policies 𝜋 𝑖 :
+(b) curriculum learning enabled by transferring role assignment           O ↦−→ A with 𝑖 ∈ N . Once trained, agents make decisions based
+is critical to success in larger teams. The other suite of experi-        on their own local observations. The CTDE scheme allows the
+ments is derived from the popular StarCraft Multi-agent challenge         team of agents to know the true state of the environment 𝑠 ∈ S
+(SMAC) [27] where we enforce stricter team coordination. Again            and all observations of others 𝑜 𝑗 ∈ O for all 𝑗 ∈ N during training.
+                                                                                                                                         (𝑡)
+we demonstrate that ours converges much faster than competing             Howerver, an agent can only access to its local observations 𝑜𝑖 to
+methods when tested on larger teams, thanks to the ability to trans-                          (𝑡)
+                                                                          make decision 𝑎𝑖 during execution to maximise the team reward
+fer role assignment from smaller teams.                                           Õ 𝑇
+                                                                                               (𝑡)
+                                                                                      Õ
+   To summarise, our contributions are: (1) A neural framework            𝑅team =        𝛾 𝑡 𝑟𝑖 .
+that learns to assign credits and agents to roles, and supports trans-             𝑖 ∈N 𝑡=0
+ferring across diﬀerent team sizes. The latter further enables cur-
+riculum learning to succeed in larger team settings and more com-         3 PROPOSED METHOD
+plex tasks; and (2) An enriched version of Prey-Predator games            Under the CTDE scheme, our aim is to design an architecture that
+and a suite of new scenarios in SMAC to support varying reward            learns to factorise the total value function of the team 𝑄 𝑡𝑜𝑡 (𝑠, 𝒂)
+horizons.                                                                 into 𝑁 = |N | components, i.e. each agent 𝑖 will predict a value
+                                                                          𝑄𝑖 (𝑜𝑖 , 𝑎𝑖 ) based on its local observation 𝑜𝑖 and action 𝑎𝑖 . That is,
+                                                                          𝑄 𝑡𝑜𝑡 is a mixing function, computed by the mixing network whose
+input is the variable-size set of mixed values Q = {𝑄 1, 𝑄 2 , ..., 𝑄 𝑁 }.   a team to solve diﬃcult tasks with a smaller number of samples,
+The challenge is in learning the mixing network to properly assign           even in situations that could not be solved by QMIX.
+credits to individual agents who play the emerging roles as the
+team interacts with the environment. The overall network design              3.2 Role-Speciﬁc Reward Horizons
+is given in Fig. 2.                                                          The eﬀective time horizon for an action is often encapsulated in
+   Each value function 𝑄𝑖 is computed using a recurrent neural               the discount factor 𝛾 of the expected future rewards. However, spe-
+network that takes the current observation, its own execution tra-           cifying the discount factor remains an art. We hypothesise that, in
+                                                                   (𝑡)
+jectory, and a possible action. Given the local observation 𝑜𝑖 at            general, roles are best played with a given time horizon: some roles
+time step 𝑡, the agent 𝑖 computes
+                                     its prediction of
+                                                      action-value         are biased towards immediate rewards (e.g., shooting prey in sight),
+      (𝑡)    (𝑡)             (𝑡)          (𝑡)                    (𝑡)
+𝑄𝑖 (𝑜𝑖 , 𝑎𝑖 ) = MLP ℎ𝑖             where 𝑥𝑖= ReLU MLP(𝑜𝑖 ) is                while others are gearing towards the long-term (e.g., guarding the
+                                           (𝑡)
+                                                      
+                                                        (𝑡) (𝑡−1)
+                                                                            camp).
+a transformation of the observation and ℎ𝑖 = GRU 𝑥𝑖 , ℎ𝑖                        This suggests the following regulariser at each time step 𝑡 of a
+is the hidden states of the gated recurrent neural networks (GRU)            training episode:
+[6].
+                                                                                                           𝐾
+                                                                                                         2          2
+                                                                                            (𝑡)       1 Õ
+3.1     The Mixing Network                                                                R𝐿𝑆𝑇 𝑅𝑅 =         𝑄𝑘∗ − 𝑅𝑘    for 𝐾2 ≤ 𝐾,                   (3)
+                                                                                                      𝐾2
+Taking the role-based approach and assuming there are 𝐾 “roles”,                                          𝑘=1
+we design a new neural architecture for the mixing network. Given            where LSTRR
+                                                                                      Í      stands for Long-Short
+                                                                                                                           Term Rewarded Roles. Here
+                                          𝑁 , the mixing network                                 (1)          (1)
+the prediction of individual agents {𝑄𝑖 }𝑖=1                                 𝑄𝑘∗ = 𝜎     𝑖 ∈N W  𝑖𝑘 𝑖
+                                                                                                     𝑄  +  𝑏  𝑘
+                                                                                                                    is  an estimation of the 𝑄-value as-
+makes a prediction about the team reward:                                                                              Í𝑇 −𝑡 𝜏 (𝑡+𝜏)
+                                                                             sociated with role 𝑘, and 𝑅𝑘 = 𝜏=0 𝛾𝑘 𝑟                  is the discounted
+                       𝐾                  𝑁
+                                                     !
+          𝑡𝑜𝑡    (2)
+                      Õ
+                             (2)    (1)
+                                          Õ
+                                                (1)                          reward for role 𝑘. This regulariser is used during the centralised
+        𝑄     =𝑏 +        W𝑘 𝜎 b𝑘 +          W𝑖𝑘 𝑄𝑖 , s.t.     (1)           training process while we know the rewards. Without loss of gen-
+                           𝑘=1            𝑖=1                                erality we assume 𝛾 1, 𝛾 2, ..., 𝛾𝐾2 is a decreasing sequence (from long-
+              (1)             (1)        (2)
+                       Õ
+                                                                             term to short-term horizons). In practice, we choose 𝐾2 = 𝐾2 to
+                                                                                                                                                  
+            W𝑖𝑘 ≥ 0;       W𝑖𝑘 = 1; and W𝑘 ≥ 0 for all 𝑖, 𝑘,           (2)
+                                                                                                                      ∗
+                       𝑖                                                     compute the summation of all 𝑄𝑘 (𝑘 ∈ [1, 𝐾2 ] , 𝑘 ∈ N) before con-
+        n             o                        n         o                                                                                      (2)
+where W (1) , W (2) are mixing coeﬃcients, b (1) , 𝑏 (2) are biases,         catenating to 𝐾 − 𝐾2 components and multiplying with W𝑘                  for
+and 𝜎 (·) is an activation function chosen to be Exponential Linear          𝑘 ∈ [1, 𝐾 − 𝐾2 + 1] , 𝑘 ∈ N.
+Unit in our implementation.
+                               (1)
+   The mixing coeﬃcient W𝑖𝑘 measures the contribution of each
+                                                                             3.3 Scaling Team Sizes by Curriculum Learning
+                                                        Í    (1)
+agent 𝑖 to a role 𝑘. The normalisation over agents 𝑖 W𝑖𝑘 = 1
+                                                                             It has been observed that training a large team in CTDE is diﬃ-
+for all 𝑘 can be interpreted as the probabilities we use to select the
+                                                 (2)                         cult [28, 35]. Thus we propose curriculum-based learning. We start
+agents for each role. The mixing coeﬃcient W𝑘 assigns the credit             by training a small team then transfer to larger teams, thus eﬀect-
+to a role 𝑘 in the total estimated reward.                                   ively reusing learnt models. Transferring across team sizes is pos-
+   The mixing function in Eq. (1) was ﬁrst studied in QMIX [25]              sible thanks to the design of the mixer which takes as input agent-
+in that the mixing coeﬃcients and biases are state-dependent, i.e.,          speciﬁc observations instead of the full observation of the whole
+through hyper-networks (e.g., see [11]) or fast weight (e.g., see            team.
+[12, 29]). However, as QMIX uses the global information (state)                 Training a smaller team permits learning by demonstrations
+to compute W (1) , it must assume a ﬁxed team size without role              from experts. Thus, it suggests a two-phase training procedure: (i)
+assignment, and thus cannot transfer the mixing network across               pre-train a small team on experiences from experts using a super-
+diﬀerent team sizes with diﬀerent roles.                                                   (𝑡)
+                                                                             vised loss L𝑠𝑢𝑝 , and (ii) continue to train on a larger team through
+   To tackle this drawback, we design the hyper-network of the
+                                                                             interacting with the environment using a the temporal diﬀerence
+ﬁrst layer such as it receives the local observations of the agents                       (𝑡)
+as inputs instead of the global states. The hyper-network generates          (TD) loss L𝑇 𝐷 . Both steps can be expressed in the following joint
+the mixing coeﬃcients as follows:                                            loss function:
+                                                                                                         (𝑡)        (𝑡)        (𝑡)
+                                                                                          L (𝑡) = L𝑇 𝐷 + 𝜆1 L𝑠𝑢𝑝 + 𝜆2 R𝐿𝑆𝑇 𝑅𝑅 ,                   (4)
+                     (1)                       (𝑡)
+                  W𝑖 = softmax𝑖 U2𝜎 U1𝑜𝑖              ,
+                                                                             where 𝜆1 > 0 is the contributing factor of the demonstration when
+            (𝑡)
+where 𝑜𝑖 ∈ R𝐷 is the observation vector of the agent 𝑖, U1 ∈                 possible, and 𝜆2 > 0 is the contributing factor of the horizon regu-
+R𝐻 ×𝐷 and U2 ∈ R𝐾×𝐻 are the weights. Other mixing coeﬃcients                 larisation deﬁned in Eq. (3) when the reward horizon matter. The
+                                                                             losses are deﬁned as:
+                                                                 
+                                                     (1)
+and biases are computed similarly to those in QMIX: b1 = MLP 𝑠 (𝑡) ;
+                                                                                   (𝑡)      1 Õ                       (𝑡)
+𝑏 (2) = MLP 𝜎 MLP 𝑠 (𝑡)       and W (2) = MLP 𝜎 MLP 𝑠 (𝑡) .                                 L𝑠𝑢𝑝 = −            log 𝑝 (𝑎𝑖 = 𝑎ˆ𝑖 |𝑜𝑖 ),
+                                                                                                        𝑁
+                                                                                                           𝑖 ∈N
+                                                                                                                     2
+   Remark. Our architecture enables the ability to transfer the mix-
+                                                                                                      
+                                                                                               (𝑡)
+                                                                                             L𝑇 𝐷 = 𝑄 − 𝑄ˆ 𝑡𝑜𝑡
+                                                                                                         𝑡𝑜𝑡
+ing networks across diﬀerent team sizes. Therefore, this helps train
+                                                                        Figure 4: Example maps of environments: Left: The map of
+                                                                        pre-train environment with 4 agents, 2 campsites; Middle:
+                                                                        target environment with 8 agents, 2 campsites; Right: tar-
+                                                                        get environment with 8 agents, 3 campsites. In each map,
+                                                                        there are ﬁve objects with diﬀerent colours: the prey (black);
+                                                                        the agents (green); the arrows (orange); (4) the defend tools
+                                                                        (cyan); and the campsites (purple).
+
+Figure 3: The structure of our enriched prey-predator games.
+                                                                        defender or prey attacker. To defend the camps, the agent needs
+All agents are tabula rasa since the beginning of one epis-
+                                                                        to collect a defence tool, steps into the campsite and stays there to
+ode. Each agent can always choose their type by collecting
+                                                                        prevent the prey from jumping in. The structure of our enriched
+the arrows (then be able to attack all prey on their sight
+                                                                        prey-predator games is shown in Fig. 3.
+without being removed from the game) or collecting the de-
+                                                                           Agents playing this enriched Prey-Predator can have suboptimal
+fence tool (to be able to enter the campsite). While attack-
+                                                                        behaviours and near-optimal behaviours. For example, one subop-
+ing prey immediately brings reward, defending campsites
+                                                                        timal behaviour is when all agents (including the archer) try to
+allows the team to explore more attack strategies to obtain
+                                                                        catch prey without collecting arrows. If the number of agents is
+higher long-term rewards.
+                                                                        insuﬃcient for catching all prey, the team that follows this joint
+                                                                        policy will obtain low rewards. In the best case, the team will kill
+with 𝑎ˆ𝑖 is the action in the demonstration and 𝑄ˆ 𝑡𝑜𝑡 is the expect-   all prey and keep campsites clear. One eﬀective strategy is to sep-
+ation of the ground truth team rewards. During the second phase,        arate the team into two parts: (1) some agents collect defence tools
+only team rewards are provided, so only the TD loss is used, i.e.,      and stay inside the camps (they are allowed to move out of the
+we set 𝜆1 = 0.                                                          camps); and (2) other agents collect arrows and kill all prey. Al-
+                                                                        though this strategy seems obvious to humans, it is a challenge for
+4     EXPERIMENT RESULTS                                                a team of artiﬁcial agents to learn.
+We validate our proposed method on two multi-agent settings: An
+enriched version of the Prey-Predator game (Section 4.1) and the           To test the ability to play the defence role of agents, we set up
+popular StarCraft Multi-agent Challenge (SMAC) [27] (Section 4.2).      a smart prey that will directly move toward the campsites – if it
+                                                                        successfully gets there, the game will be over. The smart prey will
+4.1    Enriched Prey-Predator Games                                     reach the top right campsite after 3 steps, which means the top
+                                                                        right agents need to strictly collect the defence tool and jump into
+                                                                        this campsite to defend. This will prevent the situation that agents
+   Prey-Predator is a canonical framework to study cooperative
+                                                                        can ﬁnd aggressive behaviour in attacking, i.e. directly collect ar-
+behaviours in multi-agent learning. The original format has a team
+                                                                        rows and kill all potential prey before it jumps into the campsites.
+of predators who may cooperate to catch prey. There is one near-
+optimal behaviour at which all agents cooperate to catch the prey,         Transfer learning strategy. To test transfer learning capability,
+e.g. only one type of role is required.                                 we created environments of diﬀerent diﬃculties. Fig. 4 shows an
+                                                                        example of easy setting (4 agents, 2 campsites, 28 prey), moderate
+   Game enrichment. We enriched the Prey-Predator framework to
+                                                                        setting (8 agents and 0-2 campsites) and diﬃcult setting (8 agents, 3
+induce the concept of role and to enforce strong coordination to
+                                                                        campsites). The model is ﬁrst pre-trained on the easy environment
+achieve the task. In the new game format, there are three types
+                                                                        using 50 demonstrations. The trained team succeeds in defending
+of predators: (1) Normal, (2) Archer, and (3) Defender. Each pred-
+                                                                        all campsites and capturing all the prey. Upon convergence, we
+ator can choose actions in the set of {Left, Right, Up, Down,
+                                                                        continue to train the model in the target environment by temporal
+Stay, Catch, Skill-act}. After collecting arrows, an archer can
+                                                                        diﬀerencing.
+use Skill-act to have a higher range of attacking the prey, i.e., at-
+tacking all prey in its sight instead of only the prey next to it. If   4.1.1 Transferring Results Across Team Sizes. We ﬁrst created 8
+an agent (normal, archer or defender) successfully kills a prey by      scenarios of moderate diﬃculty; each has 8 agents, with or without
+Catch, the agent will be removed from the map [3]. However, if an       campsites. Fig. 5a shows 8 maps. The corresponding performance
+archer uses Skill-act to kill prey, they can continue to hunt. The      curves are plotted in Fig. 5b. It can be seen from Fig. 5b that the
+next modiﬁcation is that we introduce camps on the map. If a prey       agents in our team can learn the optimal behaviour faster than the
+steps into a camp, the game is over with a reward of −5.0 for the       team trained by QMIX [25]. Furthermore, in environments with
+predator team. An agent chooses between at least two roles: camp        diﬀerent object positions (defence tools and arrows) or a diﬀerent
+amount of prey, our team can ﬁnd the optimal behaviour while the         4.2.2 Role-based Scenarios. To show the ability of our architec-
+QMIX can not.                                                            ture to transfer the individual and mixer networks across team
+                                                                         sizes, we construct a set of new scenarios that require strict co-
+                                                                         ordination in SMAC. More speciﬁcally, each team has buildings,
+   We then make the target environment more challenging with 8           which serve a similar purpose to the campsites in our enriched
+agents and 3 campsites (e.g., see Fig. 4(rightmost)). Fig. 6 shows the   prey-predator games in Section 4.1. For example, in a particular set-
+performance curves of our architecture compared to QMIX on 8             ting called 3m_vs_4m_buildings, the learned allied agents control
+agents and 3 campsites. While the team of agents trained by QMIX         three marines against four enemy marines, and each team has one
+gets stuck at sub-optimal policies, our model can learn the optimal      building to defend. Similarly, in 5m_vs_6m_buildings, the learned
+policy in which our team obtain higher rewards by ﬁrst defending         allied agents control ﬁve marines against six enemy marines; and
+all the campsites then capturing all prey in the game.                   each team has two buildings to defend (see Fig. 1 in Section 1 for
+4.1.2 Emerging Roles. To understand the behaviour of the trained         an illustration). The scenario 9m_vs_10m_buildings is more diﬃ-
+team, we project the mixing coeﬃcient which is generated by the          cult because there are two enemy marines always guarding their
+                                                                         buildings, and each team has three buildings.
+ﬁrst-layer hyper-network (W (1) in Eq. (1)) for each agent onto 2D
+                                                                             In our scenarios, the team needs not only to kill the opponent’s
+by PCA. Fig. 7 shows the diﬀerence between agents within diﬀer-
+                                                                         troop aggressively but also to defend its buildings and to destroy
+ent roles. The group of agents {0, 3, 4} which should collect arrows
+                                                                         the enemy buildings. This is because the game will be terminated
+to capture prey is separated from the group of agents {1, 2, 5, 6, 7}
+                                                                         if all buildings of one team are destroyed. This forces agents to
+which should defend the campsites. Interestingly, the agent No.
+                                                                         choose the defender or attacker roles when they see ﬁt. At the be-
+3, which is nearby the smart prey and should strictly defend the
+                                                                         ginning of an episode, there are enemy marines placed nearby the
+campsite, has the 2D latent variable far from others in the same
+                                                                         allied buildings; therefore, defending own buildings is crucial to
+group of agents playing defend role. Agents 0, 3, and 4 are placed
+                                                                         winning the game.
+nearby the defence tools and the campsites. Therefore, they have
+                                                                             We compare our algorithm against three major baselines on
+higher frequencies of visiting the campsites to defend, while other
+                                                                         SMAC: (1) QMIX [25]: the mixer network captures non-linear and
+agents learn to collect the arrows and move around together to
+                                                                         monotonicity properties; (2) ROMA [34] which learns emergent
+capture all prey. The visitation map is shown in Fig. 8.
+                                                                         roles by hyper-network to generate weights of individual agents;
+4.1.3 Ablation Study. To highlight the role of the LSTRR regular-        (3) DyMA-CL [36]: transfer individual policy network. We con-
+isation, we intentionally lower the performance of our method            sider the curriculum with the increasing team size and diﬃculty.
+on the hard setting (8 agents and 3 campsites) to roughly match          The DyMA-CL obtained good results before being transferred to
+that by QMIX by reducing the embedding size in the ﬁrst layer of         the bigger team size. Our individual and mixer networks are ﬁrst
+the mixing network from 16 (as used in previous experiments) to          pre-trained on the team of size 3 (3m_vs_4m_buildings), then trans-
+8. However, augmenting our method with the LSTRR regulariser             ferred to train the team of size 5 (5m_vs_6m_buildings). Finally, it is
+greatly pushes the performance back, as shown in Fig. 9.                 trained with the team of size 9 (9m_vs_10m_buildings). Figs. 11 and
+                                                                         12 show that our networks trained with LSTRR regulariser can out-
+4.2    StarCraft Multi-Agent Challenge (SMAC)                            perform other baselines on the target tasks 5m_vs_6m_buildings
+                                                                         and 9m_vs_10m_buildings, respectively. Critically, without the LSTRR,
+SMAC [27] is a recently benchmark for algorithms for CTDE fo-
+                                                                         it is impossible to learn to play 9m_vs_10m_buildings at all (Fig. 12).
+cusing on the StarCraft II Micro-Management in which each unit
+is controlled by an agent.
+                                                                         4.2.3 Improving ROMA. We conducted experiments to test our
+4.2.1 Implementation Details. For each agent in SMAC, its obser-         mixer with ROMA [34] as individual policies (individual policies in-
+vation is ﬁrst pre-processed, as shown in Fig. 10. The purpose is to     clude a hyper-network to generate roles) on two benchmark scen-
+make the observation 𝑜𝑖 of each agent independent of the number          arios: (1) 2s3z (classiﬁed as a Symmetric and Easy scenario): con-
+of agents in a team by sharing weights between observations of ob-       trolling 2 Stalkers and 3 Zealots to defeat an enemy team which
+jects of the same types, e.g. allied troops, allied buildings, enemy     has the same units; (2) MMM2 (classiﬁed as an Asymmetric and
+troops, or enemy buildings.                                              Hard scenario): controlling 1 Medivac, 2 Marauders and 7 Marines
+    The strategy to choose actions during exploration (training phase)   to defeat an enemy team with 1 Medivac, 3 Marauders and 8 Mar-
+is 𝜖−greedy. In the experiment, 𝜖 is annealing from 0.15 to 0.05 dur-    ines. We incorporated our architecture of the mixer into ROMA.
+ing the ﬁrst 50𝐾 time steps in the source task and during the ﬁrst       Fig. 13 shows that our architecture is more sample eﬃcient than
+100𝐾 time steps in the target task. Each agent does not observe it-      ROMA in both scenarios. The team trained by ROMA has longer
+self ID to learn the index-free policy. The batch size is 32 episodes.   episode lengths compared to our method (Fig. 14). To investigate
+The optimisation is RMSprop with no momentum or weight decay,            this observation, we compared the test battles of two methods.
+the learning rate is set as 5 × 10−4 , and 𝛼 = 0.99. We use the same     After 2, 000, 000 training time steps, even though teams trained by
+method as proposed in SMAC paper to evaluate our agents, which           ROMA and ours could not learn to defeat the enemy, there are
+is after training for an interval of 10𝐾 time steps, the learning team   signiﬁcant diﬀerences in the agents’ behaviours. We observed the
+will decentralised execute. We then measure the common rewards           reward hacking phenomenon in the team trained by ROMA. In the
+(for modiﬁed prey-predator) or the test win rate (for SMAC).             middle of an episode, when some agents were killed (the chance
+                                                                         for the team to win is small), alive agents retreated to the corner
+           (a) Test maps of moderate settings.                                 (b) Performance of transfer.
+
+Figure 5: Moderate settings of enriched prey-predator with 8 agents and 2 campsites. (a) Test maps in moderate settings of
+modiﬁed prey-predator games with 8 agents. The maps with even index has two campsites; the maps with odd index does not
+have any campsite. (b) Team rewards (y-axis) vs. training time steps (x-axis) of teams trained by QMIX (red) and our method
+(blue). Our method can learn the optimal behaviour faster than QMIX in the training environment (map No.6). In map No.4,
+the team trained by QMIX could not behave optimally, leading to a signiﬁcant diﬀerence in the team rewards.
+
+
+
+
+                                                                       5 RELATED WORKS
+                                                                          Team decomposition. Value decomposition of a team reward in
+                                                                       the CTDE paradigm was pioneered by VDN [31] which is a simple
+                                                                       linear composition of individual 𝑄-values. Later, QMIX [25] im-
+                                                                       proved the composition function by bringing in the global state in-
+                                                                       formation and relaxing the linearity into a monotonic linear com-
+                                                                       position. However, this monotonicity restricts the class of value
+                                                                       functions, especially, it could fail to represent the optimal 𝑄 ∗ [3,
+                                                                       24]. To overcome this limitation, QTRAN [30] relaxed the additiv-
+                                                                       ity and monotonicity by transforming all value functions to satisfy
+                                                                       the Individual-Global-Max (IGM) condition. Alternatively, Qatten
+                                                                       [38] implemented multi-head attention to generate the weights for
+                                                                       agents based on their own properties. QPLEX [33], on the other
+Figure 6: Team rewards (y-axis) vs. training time steps (x-            hand, used a duelling structure for both joint and individual value
+axis) of teams trained by QMIX (red) and our method (blue)             functions, which can beneﬁt from oﬀ-line RL [15].
+in the diﬃcult setting which has 8 agents and 3 campsites.
+                                                                          Roles. Another important line of work focuses on training agents
+The team trained by our method can learn to converge to
+                                                                       to discover behaviours and roles. ROMA [34] designed a role em-
+optimal behaviour, while the team trained by QMIX can not.
+                                                                       bedding space and used a hyper-network to model the individual
+                                                                       policies conditioned on the role. The authors also introduced reg-
+of the map (out of the sight of the enemy). It is reasonable for in-   ularisers based on diversity and identiﬁability to encourage the
+dividual agents to avoid being killed. However, it induces wasteful    role emergence. RODE [35] improved upon ROMA on role dis-
+samples for the training during the end phase of the episodes. All     covery by decomposing the joint action space into regions asso-
+agents in our team, in contrast, engage in the battle and learn the    ciated with diﬀerent roles, thus learning a role selector and a role
+optimal behaviours to win this game.                                   policy of lower temporal resolution. In MARL, all agents need to
+Figure 7: PCA projection of the ﬁrst layer weight W (1) into 2D – QMIX (left) and our architecture (right). The number is the
+indices of agents. The group of agents {0, 3, 4} which should collect arrows to capture prey is separated from the group of agents
+{1, 2, 5, 6, 7} which should defend the campsites. We observe that amongst the set of defenders {0, 3, 4}, the agent No. 3, which is
+nearby the smart prey and should strictly defend the campsite, has the 2D latent variable far from others in the same group of
+agents playing defend role. Our method can learn the optimal behaviour in the training environment, while the QMIX could
+not learn the optimal policy.
+
+
+
+
+                            (a) QMIX                                                         (b) Our method
+
+Figure 8: The visitation map at around 200, 000 time steps of agents trained by (a) QMIX; and (b) Our method. There are eight
+agents 0-based indexed. Their visitation map from left to right and from top to down, for example, the ﬁrst map in the second
+row of each sub-ﬁgure is the visitation map of agent 4. In the team trained by QMIX, the agents could not learn to defend the
+campsites. If trained by our method, agents indexed by 0, 3, 4 should defend the campsite. This does not only help to avoid
+failure but also enable others to ﬁnd out the optimal policy for capturing all prey (other agents 1, 2, 5, 6, 7 can explore the map,
+which is shown in sub-ﬁgure b).
+
+
+
+
+                                                                         Figure 10: Observation pre-processing architecture.
+
+
+
+
+                                                                     coordinate their actions. Individually exploring the environment
+                                                                     could induce a large amount of noisy rewards during training, a
+Figure 9: Team rewards (y-axis) vs. Training time steps (x-          non-stationary learning phenomenon [5]. Diﬀerent from ROMA
+axis) of teams trained by QMIX (red) and our method (blue)           which only motivates each agent individually to explore optimal
+and our method augmented with long short-term objective              behaviour, MAVEN [17] created a framework to explore the space
+(green) in the hard setting which has 8 agents and 3 camp-           of joint behaviours. While both ROMA and MAVEN applied the
+sites. The ﬁrst layer of all mixing networks in this experi-         technique of conditioning agent behaviours on latent variables, Q-
+ment outputs a latent variable that only has the size of 8.          DPP [39] applied the determinantal point process to improve the
+                                                                     coordinated exploration when training an RL team.
+                                                                                                    (a) 2s3z (Easy)
+
+
+
+
+Figure 11: [Best viewed in colour] Test Win Rate (y-axis) vs.
+Training time steps (x-axis) of teams trained by our method
+and baselines on the target task 5m_vs_6m_buildings.
+
+
+
+                                                                                                  (b) MMM2 (Hard)
+
+                                                                        Figure 13: Test win rate vs. Training time steps in two SMAC
+                                                                        settings: (1) an easy setting and (2) a hard setting.
+
+
+
+
+Figure 12: Test Win Rate (y-axis) vs. Training time steps (x-           Figure 14: Episode length vs. Training time steps in MMM2.
+axis) of teams trained by our method and baselines on the               estimate the value function in temporal diﬀerence learning, espe-
+target task 9m_vs_10m_buildings.                                        cially when the amount of data is limited. However, these works
+                                                                        only focus on using diﬀerent discount factors to facilitate training
+                                                                        a single reinforcement learning agent; we investigate the use of
+    Transfer learning in teams. Training good individual policies for   diﬀerent discount factors in multi-agent learning, realising under
+a small team size then adjusting these policies for a large team        the concept of roles.
+size can be considered as an instance of curriculum learning. Re-
+cently, DyMA-CL [36] proposed a training strategy on top of value       6 CONCLUSION
+based methods to transfer across diﬀerent team sizes. However,          We have introduced a new multi-agent reinforcement learning frame-
+this method does not take into account the learning and transfer-       work to help scale an important paradigm known as centralised
+ring roles of agents. Transferring to new team sizes requires learn-    training decentralised execution (CTDE). We redesigned the mix-
+ing an index-free policy in which the agent behaviour does not de-      ing network in the popular QMIX framework to enable (i) learn-
+pend on its index in the team. In [14], authors proposed a method       ing with arbitrary team sizes; (ii) assigning credits to roles, each
+to learn roles from a set of experiences. This method distinguishes     of which evaluates and attributes contributions from individual
+roles by the trajectories induced by these roles, while our method      agents; and (iii) curriculum learning process that starts from smal-
+tries to learn roles based on their eﬀects at diﬀerent time scales.     ler teams and progresses to large teams. We also contributed two
+    Learning multiple horizons has been empirically proved to im-       suites of MARL experiments to evaluate strongly cooperative CTDE
+prove the performance of a single RL agent. The work in [37] pro-       tasks that demand the notion of roles dynamically played by the
+posed to optimise the discount factor 𝛾. The work in [8] suggested      agents. One suite enriches the Prey-Predator games to include more
+learning diﬀerent 𝑄-values for diﬀerent discount factors as aux-        types, roles and skills. The other suite of experiments extends the
+iliary tasks. In [26], the value function is broken down into dif-      StarCraft II Micro-Management tasks. We demonstrated that the
+ferent components based on smaller discount factors. Recently, it       proposed framework leads to faster convergence and the emer-
+has been suggested in [1] the use of reduced discount factors to        gence of roles and can succeed in certain large team settings.
+REFERENCES                                                                                     PMLR, 2681–2690.
+ [1] Ron Amit, Ron Meir, and Kamil Ciosek. 2020. Discount factor as a regularizer in      [24] Tabish Rashid, Gregory Farquhar, Bei Peng, and Shimon Whiteson. 2020.
+     reinforcement learning. In International conference on machine learning. PMLR,            Weighted QMIX: Expanding Monotonic Value Function Factorisation for Deep
+     269–278.                                                                                  Multi-Agent Reinforcement Learning. In Advances in Neural Information Pro-
+ [2] Bruce J Biddle. 2013. Role theory: Expectations, identities, and behaviors. Aca-          cessing Systems 33: Annual Conference on Neural Information Processing Systems
+     demic Press.                                                                              2020, NeurIPS 2020, virtual.
+ [3] Wendelin Böhmer, Vitaly Kurin, and Shimon Whiteson. 2020. Deep coordination          [25] Tabish Rashid, Mikayel Samvelyan, Christian Schröder de Witt, Gregory Far-
+     graphs. In International Conference on Machine Learning. PMLR, 980–991.                   quhar, Jakob N. Foerster, and Shimon Whiteson. 2018. QMIX: Monotonic Value
+ [4] Lucian Buşoniu, Robert Babuška, and Bart De Schutter. 2010. Multi-agent re-               Function Factorisation for Deep Multi-Agent Reinforcement Learning. In Pro-
+     inforcement learning: An overview. Innovations in multi-agent systems and                 ceedings of the 35th International Conference on Machine Learning, ICML 2018,
+     applications-1 (2010), 183–221.                                                           Stockholmsmässan, Stockholm, Sweden. PMLR, 4292–4301.
+ [5] Yu-Han Chang, Tracey Ho, and Leslie Kaelbling. 2003. All learning is local: Multi-   [26] Joshua Romoﬀ, Peter Henderson, Ahmed Touati, Yann Ollivier, Emma Brunskill,
+     agent learning in global reward games. Advances in neural information processing          and Joelle Pineau. 2019. Separating value functions across time-scales. CoRR
+     systems 16 (2003), 807–814.                                                               abs/1902.01883 (2019). http://arxiv.org/abs/1902.01883
+                                                                                          [27] Mikayel Samvelyan, Tabish Rashid, Christian Schroeder de Witt, Gregory Far-
+ [6] Junyoung Chung, Caglar Gulcehre, KyungHyun Cho, and Yoshua Bengio. 2014.
+                                                                                               quhar, Nantas Nardelli, Tim G. J. Rudner, Chia-Man Hung, Philiph H. S. Torr,
+     Empirical evaluation of gated recurrent neural networks on sequence modeling.             Jakob Foerster, and Shimon Whiteson. 2019. The StarCraft Multi-Agent Chal-
+     arXiv preprint arXiv:1412.3555 (2014).
+                                                                                               lenge. CoRR abs/1902.04043 (2019).
+ [7] Jeﬀrey L Elman. 1993. Learning and development in neural networks: The im-
+                                                                                          [28] Mikayel Samvelyan, Tabish Rashid, Christian Schroeder de Witt, Gregory Far-
+     portance of starting small. Cognition 48, 1 (1993), 71–99.
+                                                                                               quhar, Nantas Nardelli, Tim GJ Rudner, Chia-Man Hung, Philip HS Torr, Jakob
+ [8] William Fedus, Carles Gelada, Yoshua Bengio, Marc G Bellemare, and Hugo
+                                                                                               Foerster, and Shimon Whiteson. 2019. The StarCraft Multi-Agent Challenge. In
+     Larochelle. 2019. Hyperbolic discounting and learning over multiple horizons.             Proceedings of the 18th International Conference on Autonomous Agents and Mul-
+     arXiv preprint arXiv:1902.06865 (2019).
+                                                                                               tiAgent Systems. 2186–2188.
+ [9] Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and
+                                                                                          [29] Jürgen Schmidhuber. 1992. Learning to control fast-weight memories: An altern-
+     Shimon Whiteson. 2018. Counterfactual multi-agent policy gradients. In Pro-
+                                                                                               ative to dynamic recurrent networks. Neural Computation 4, 1 (1992), 131–139.
+     ceedings of the AAAI Conference on Artiﬁcial Intelligence, Vol. 32.
+                                                                                          [30] Kyunghwan Son, Daewoo Kim, Wan Ju Kang, David Earl Hostallero, and Yung
+[10] Jayesh K Gupta, Maxim Egorov, and Mykel Kochenderfer. 2017. Cooperative
+                                                                                               Yi. 2019. Qtran: Learning to factorize with transformation for cooperative multi-
+     multi-agent control using deep reinforcement learning. In International Confer-
+                                                                                               agent reinforcement learning. arXiv preprint arXiv:1905.05408 (2019).
+     ence on Autonomous Agents and Multiagent Systems. Springer, 66–83.                   [31] Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Viní-
+[11] David Ha, Andrew Dai, and Quoc V Le. 2017. HyperNetworks. ICLR (2017).
+                                                                                               cius Flores Zambaldi, Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z
+[12] Geoﬀrey E Hinton and David C Plaut. 1987. Using fast weights to deblur old
+                                                                                               Leibo, Karl Tuyls, et al. 2018. Value-Decomposition Networks For Cooperative
+     memories. In Proceedings of the ninth annual conference of the Cognitive Science
+                                                                                               Multi-Agent Learning Based On Team Reward. In AAMAS. 2085–2087.
+     Society. 177–186.
+                                                                                          [32] Ming Tan. 1993. Multi-agent reinforcement learning: Independent vs. cooperat-
+[13] Landon Kraemer and Bikramjit Banerjee. 2016. Multi-agent reinforcement learn-             ive agents. In Proceedings of the tenth international conference on machine learn-
+     ing as a rehearsal for decentralized planning. Neurocomputing 190 (2016), 82–94.
+                                                                                               ing. 330–337.
+[14] Hoang M Le, Yisong Yue, Peter Carr, and Patrick Lucey. 2017. Coordinated multi-
+                                                                                          [33] Jianhao Wang, Zhizhou Ren, Terry Liu, Yang Yu, and Chongjie Zhang. 2021.
+     agent imitation learning. arXiv preprint arXiv:1703.03121 (2017).
+                                                                                               QPLEX: Duplex Dueling Multi-Agent Q-Learning. In 9th International Confer-
+[15] Sergey Levine, Aviral Kumar, George Tucker, and Justin Fu. 2020. Oﬄine rein-
+                                                                                               ence on Learning Representations, ICLR 2021, Virtual Event, Austria.
+     forcement learning: Tutorial, review, and perspectives on open problems. arXiv
+                                                                                          [34] Tonghan Wang, Heng Dong, Victor R. Lesser, and Chongjie Zhang. 2020.
+     preprint arXiv:2005.01643 (2020).
+                                                                                               ROMA: Multi-Agent Reinforcement Learning with Emergent Roles. ICML
+[16] Ryan Lowe, Yi I Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor                 abs/2003.08039 (2020). https://arxiv.org/abs/2003.08039
+     Mordatch. 2017. Multi-agent actor-critic for mixed cooperative-competitive en-
+                                                                                          [35] Tonghan Wang, Tarun Gupta, Anuj Mahajan, Bei Peng, Shimon Whiteson, and
+     vironments. In Advances in neural information processing systems. 6379–6390.
+                                                                                               Chongjie Zhang. 2021. RODE: Learning Roles to Decompose Multi-Agent Tasks.
+[17] Anuj Mahajan, Tabish Rashid, Mikayel Samvelyan, and Shimon Whiteson. 2019.
+                                                                                               ICLR (2021).
+     Maven: Multi-agent variational exploration. In Advances in Neural Information
+                                                                                          [36] Weixun Wang, Tianpei Yang, Yong Liu, Jianye Hao, Xiaotian Hao, Yujing
+     Processing Systems. 7613–7624.                                                            Hu, Yingfeng Chen, Changjie Fan, and Yang Gao. 2020.                From Few to
+[18] Laetitia Matignon, Guillaume J Laurent, and Nadine Le Fort-Piat. 2012. Independ-
+                                                                                               More: Large-Scale Dynamic Multiagent Curriculum Learning. In The Thirty-
+     ent reinforcement learners in cooperative markov games: a survey regarding
+                                                                                               Fourth AAAI Conference on Artiﬁcial Intelligence, AAAI 2020. 7293–7300.
+     coordination problems. The Knowledge Engineering Review 27, 1 (2012), 1–31.
+                                                                                               https://aaai.org/ojs/index.php/AAAI/article/view/6221
+[19] Sanmit Narvekar, Bei Peng, Matteo Leonetti, Jivko Sinapov, Matthew E. Taylor,
+                                                                                          [37] Zhongwen Xu, Hado P van Hasselt, and David Silver. 2018. Meta-gradient rein-
+     and Peter Stone. 2020. Curriculum Learning for Reinforcement Learning Do-
+                                                                                               forcement learning. Advances in neural information processing systems 31 (2018),
+     mains: A Framework and Survey. J. Mach. Learn. Res. 21 (2020), 181:1–181:50.
+                                                                                               2396–2407.
+[20] Sanmit Narvekar and Peter Stone. 2019. Learning Curriculum Policies for Re-          [38] Yaodong Yang, Jianye Hao, Ben Liao, Kun Shao, Guangyong Chen, Wulong Liu,
+     inforcement Learning. In Proceedings of the 18th International Conference on
+                                                                                               and Hongyao Tang. 2020. Qatten: A General Framework for Cooperative Mul-
+     Autonomous Agents and MultiAgent Systems. 25–33.
+                                                                                               tiagent Reinforcement Learning. arXiv preprint arXiv:2002.03939 (2020).
+[21] Frans A. Oliehoek and Christopher Amato. 2016. A Concise Introduction to De-
+                                                                                          [39] Yaodong Yang, Ying Wen, Lihuan Chen, Jun Wang, Kun Shao, David Mguni, and
+     centralized POMDPs. Springer.
+                                                                                               Weinan Zhang. 2020. Multi-Agent Determinantal Q-Learning. arXiv preprint
+[22] Frans A Oliehoek, Matthijs TJ Spaan, and Nikos Vlassis. 2008. Optimal and                 arXiv:2006.01482 (2020).
+     approximate Q-value functions for decentralized POMDPs. Journal of Artiﬁcial
+                                                                                          [40] Kaiqing Zhang, Zhuoran Yang, and Tamer Başar. 2021. Multi-agent reinforce-
+     Intelligence Research 32 (2008), 289–353.
+                                                                                               ment learning: A selective overview of theories and algorithms. Handbook of
+[23] Shayegan Omidshaﬁei, Jason Pazis, Christopher Amato, Jonathan P How, and
+                                                                                               Reinforcement Learning and Control (2021), 321–384.
+     John Vian. 2017. Deep decentralized multi-task multi-agent reinforcement learn-
+     ing under partial observability. In International Conference on Machine Learning.
+

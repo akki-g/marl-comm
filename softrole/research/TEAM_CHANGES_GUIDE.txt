@@ -1,0 +1,274 @@
+MARL THESIS / DECISION GUIDES                                                       19 SEPTEMBER 2026
+
+
+
+
+ Guide 3 | Team changes and
+ information-role recovery
+ Can the team use the backup when its usual source
+ fails?
+ Question: When the usual scout loses its sensor, can the team use another capable scout—
+ or has it learned a coordination pattern that works only with the original assignment?
+
+ Key deliverable: An empirical characterization of failure recovery, separating lost physical
+ capability from failure to use a surviving information source. The intervention is primarily
+ training-data and evaluation design, not a new architecture.
+
+ Recommendation: My preferred alternative to Guide 1 under your scope constraint. Keep
+ three agents throughout and study sensing-role handover. Do not begin with arbitrary new
+ teammates, variable populations, or hypernetworks.
+
+ Basis: The report's third direction, p. 20, and primary literature checked on 19 September
+ 2026. The fixed-team design below is narrower than general ad hoc teamwork. All new
+ outcomes remain hypotheses.
+
+ 1. The contribution we would try to make
+ A candidate claim is: robustness to random missing messages does not necessarily
+ imply robustness when useful information moves to a different teammate; varying
+ information roles during training can reveal or reduce that gap.
+
+ This is not a claim that source diversity or failure training is new. The possible contribution is
+ the controlled comparison: same network, same number of agents, same surviving
+ capabilities, and matched communication conditions, with a measured explanation of the
+ remaining recovery failure.
+
+ The alternative outcome is equally important: ordinary shared policies may already handle
+ the handover. That would narrow the role-recovery concern for the tested setting instead of
+ motivating another architecture.
+
+ 2. What prior research already covers
+ ROMA learns role representations and specialized, dynamic behaviors. “Agents learn roles”
+ is already an established contribution. We would not implement a competing role-learning
+ network. [1]
+
+ HyperMARL studies shared learning and agent specialization using hypernetworks,
+ including problems associated with coupling IDs and observations. It is relevant background,
+ not a required replacement for our shared actors. [2]
+
+ JaxAHT provides teammate-generation and unseen-partner evaluation infrastructure. It
+ matters if we later introduce independently trained replacement policies. A sensor-role
+ handover among jointly trained agents is not the same claim as cooperation with unfamiliar
+ teammates. [3]
+
+
+
+
+GUIDE 3 / EMPIRICAL RESEARCH OPTIONS                                                                  1
+MARL THESIS / DECISION GUIDES                                                    19 SEPTEMBER 2026
+
+
+
+ Message-Dropout establishes missing-message training as a robustness baseline. The key
+ comparison here is whether that exposure transfers to a different source/role configuration.
+ [4]
+
+ A recent PL-MARL preprint also studies sparse communication and node failure in aerial
+ coverage. Broad “resilient MARL under node failure” is therefore not a fresh claim. Its
+ physical-inference approach is a distinct method; our proposed study isolates information-
+ role recovery instead. [5]
+
+ These are adjacent precedents, not a certification that the exact handover comparison is
+ untouched. Before the main study, check their experiments and references for role
+ randomization, sensor failures, and information redundancy—not only their paper titles.
+
+ 3. A task small enough to finish
+ Use two potential scouts and one responder. The scouts can visit a sensing area to discover
+ which of two service sites needs attention. The responder travels to the correct site. A fresh
+ request is generated each round, so old information cannot solve every later request.
+
+ Both scouts are capable of sensing. Initially one is positioned or assigned to observe, while
+ the other is a potential backup. In the failure condition the usual scout loses sensing, but
+ keeps movement and radio. The backup remains able to reach the sensing area and deliver
+ new information.
+
+ The task must remain physically solvable with the surviving capabilities. A scripted handover
+ controller establishes this before learning experiments. Do not remove the only working
+ sensor and then call the resulting impossibility poor coordination.
+
+ Keep the team at three agents and retain fixed-width observations. This avoids the variable-
+ team encoder changes described in the audit. Current PCP's homogeneous predators do not
+ already implement these sensing roles; use a new task version. [R, pp. 7, 20]
+
+ Announce the failure in the first study
+ Give all compared methods the same explicit capability/failure flags, without revealing the
+ request itself. This tests response to a known failure, not diagnosis of an unobserved
+ failure.
+
+ Use valid/invalid flags for missing measurements instead of letting a zero coordinate look like
+ a legitimate observation. A short declared observation-history window can be used
+ consistently across methods; it is not unrestricted memory.
+
+ Separate two evaluation conditions
+ Controlled handover: after switching the source, ensure the backup can obtain the next
+ cue without extra travel. Keep one useful source and the same permitted packet schedule.
+ This checks whether the team can use a different source under simplified geometry.
+
+ Physical recovery: the backup must move into sensing range after failure. This adds the
+ real role-reassignment/navigation problem. Its reference controller has the same remaining
+ sensors and speed limits.
+
+ Do not interpret a controlled-handover failure as purely “message-language incompatibility.”
+ Changed local states, optimization, and history could also matter. Compare against explicit-
+ information and movement controls before attributing an internal mechanism.
+
+
+
+
+GUIDE 3 / EMPIRICAL RESEARCH OPTIONS                                                               2
+MARL THESIS / DECISION GUIDES                                                        19 SEPTEMBER 2026
+
+
+
+ 4. Exactly what we ablate during training
+ Use the existing Broadcast policy first. Cross two factors:
+
+  Factor                        Condition A                Condition B
+
+  Information-role              Same scout starts as the   Starting useful scout is randomized
+  assignment                    useful source.             between episodes.
+
+  Message availability          Clean delivery.            Independent packet dropout at a fixed
+                                                           declared rate.
+
+
+ Keep training frames, model sizes, message widths, task distributions, and opportunity to
+ transmit the same within each dropout condition. In the controlled fixture, hold physical
+ positions and site identities fixed while varying which scout receives the cue. Use equal-
+ travel geometry to avoid giving one source an easier mission. Do not simply swap every
+ agent label, position, and observation together: for a symmetric shared policy that is a
+ relabeling, not a meaningful training ablation.
+
+ Four Broadcast cells × three development seeds = 12 communicating pilot policies. Add
+ LocalCapacity under fixed and randomized starting roles: two cells × three seeds = six local
+ policies, giving 18 pilot policies total. No local runs need to be duplicated merely because
+ their nonexistent channel has a dropout setting.
+
+ During this first training phase, roles do not switch within an episode. Evaluation introduces
+ that transition. The randomized condition therefore has experience with each scout serving
+ the role, but not necessarily with recovering from a mid-episode failure.
+
+ 5. The tests that distinguish the explanations
+ Evaluate each policy on intact episodes, controlled handovers, and physical sensing failures.
+ Pair the request sequence and environment randomness across comparable conditions.
+ Begin with a fixed midpoint handover; reserve other failure times and geometries for a later
+ held-out check.
+
+ First question: is the team still capable? The scripted controller with surviving
+ capabilities should complete post-failure requests. Its score is a feasible reference, not a
+ proven optimum.
+
+ Second question: does information-role exposure matter? Compare the fixed-role and
+ randomized-role Broadcast cohorts under the same dropout training condition. Report both
+ their intact performance and the change caused by failure. Otherwise, a difference in basic
+ task competence can be mistaken for a recovery effect.
+
+ Third question: does packet-dropout training cover this failure? Compare its
+ improvement on message outages with its improvement on sensing-role handover. The task
+ loses a sensor in one case and messages in the other; do not equate those disruptions
+ simply because both reduce received data.
+
+ Fourth question: is the effect specific to one aggregator? If the pilot reveals a clear
+ mechanism, repeat the decisive training contrast with existing Attention. A result only for
+ Broadcast should be described as such, not as a universal property of MARL.
+
+
+
+
+GUIDE 3 / EMPIRICAL RESEARCH OPTIONS                                                                3
+MARL THESIS / DECISION GUIDES                                                      19 SEPTEMBER 2026
+
+
+
+ The small seed counts above are for development. Before the final comparison, freeze one
+ primary contrast and choose the training-seed allocation using pilot variability and a
+ practical effect size. Use disjoint development/test scenarios, average episodes within each
+ policy, and report every seed and failed run.
+
+ A crucial symmetry check
+ A pure relabeling of identical agents, with observations and masks permuted consistently,
+ should not change a permutation-equivariant shared policy's behavior apart from relabeling.
+ Broadcast pooling alone does not imply a learned dependence on sender identity.
+
+ Run this as a null test. A real sensing failure changes capability and information; changing
+ the order of array entries is not the same intervention. Do not add ID embeddings just to
+ create a problem to solve.
+
+ 6. Outcomes and measurements
+ Use the fraction of post-failure requests served before their deadlines as the
+ primary endpoint. Show request-by-request success aligned to failure time, time to the first
+ correct post-failure service, duplicate/wasted travel where relevant, and communication cost.
+ Retain episodes that never recover instead of averaging recovery time over successes only.
+
+ Report a recovery penalty for each cohort: intact success minus failure-condition success.
+ The main training-ablation effect is the difference in those penalties between fixed and
+ randomized roles, accompanied by the raw success values. This helps separate general skill
+ from failure sensitivity.
+
+ For mechanism evidence, log when the backup first sees the new cue, when a useful packet
+ reaches the responder, and whether the responder makes the correct commitment.
+ Suppressing each sender separately can identify dependence of the frozen policy, but large
+ attention weights or message magnitude alone do not establish utility.
+
+ Possible finding: randomized roles reduce handover loss even when packet dropout alone
+ does not. To strengthen that conclusion, show comparable intact competence, physically
+ solvable failure episodes, and repeated effects across seeds and a held-out setting.
+
+ Contrary finding: both curricula recover equally well. A precise bounded null can still be
+ useful; it is not evidence that all changing-team problems are solved. Do not continue adding
+ artificial asymmetry until a failure appears.
+
+ 7. Deliverable, implementation, and novelty assessment
+ The final deliverable is a fault-recovery study with a training-ablation table, a recovery curve,
+ and a diagnostic separating “backup never obtained information” from “information arrived
+ but the task still failed.” Release the failure-event definitions, observation contract, policies,
+ and per-seed evidence.
+
+ Reuse MAPPO, LocalCapacity, Broadcast, and optionally Attention. Add the versioned task,
+ capability flags, failure scheduling, paired event evaluation, and recovery metrics. Do not
+ add variable populations, new role embeddings, new losses, or unfamiliar policy
+ replacements in the first paper. [R, pp. 18–20]
+
+
+
+
+GUIDE 3 / EMPIRICAL RESEARCH OPTIONS                                                                  4
+MARL THESIS / DECISION GUIDES                                                                19 SEPTEMBER 2026
+
+
+
+ Novelty potential: a focused information-role transfer result could be distinctive and
+ directly relevant to resilient robot teams. A generic node-removal experiment is much
+ weaker. The hardest part is causal interpretation, especially distinguishing changed
+ geometry and useful-information availability from an alleged communication-protocol
+ problem.
+
+ First deliverable: the two-scout/one-responder fixture and a scripted controller that
+ succeeds after a known sensor failure. Then run the controlled handover before the full
+ physical-recovery study. This is my second choice because it keeps architecture work small
+ while asking a concrete failure question.
+
+
+ Sources and reading
+ [R] Supplied strategy report, 19 September 2026, pp. 7, 18–20.
+
+ [1] Wang et al. ROMA: Multi-Agent Reinforcement Learning with Emergent Roles. ICML 2020.
+ arXiv:2003.08039.
+
+ [2] Tessera et al. HyperMARL: Adaptive Hypernetworks for Multi-Agent RL. arXiv:2412.04233v4 (2025
+ revision).
+
+ [3] Wang et al. JaxAHT: A JAX-Based Library for Ad Hoc Teamwork. September 2026 preprint.
+ arXiv:2609.13716v1. Read for what an unseen-partner evaluation actually requires.
+
+ [4] Kim, Cho, and Sung. Message-Dropout: An Efficient Training Method for Multi-Agent Deep Reinforcement
+ Learning. AAAI 2019. arXiv:1902.06527. Read before treating message-loss training as a contribution.
+
+ [5] Lai and Tsai. Predictive Lightweight MARL for Resilient Coverage in Sparse-Signaling Aerial Networks. July
+ 2026 preprint. arXiv:2607.22109. Primary abstract checked; full experimental coverage was not verified in
+ this update. Treat it as a required novelty check, not a baseline already assessed in depth.
+
+
+
+
+GUIDE 3 / EMPIRICAL RESEARCH OPTIONS                                                                              5
+

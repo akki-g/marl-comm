@@ -48,3 +48,5 @@ mappo_*_ensemblemodel__*/
 
 *.tar.gz
 /old_logs/
+
+/softrole/papers/

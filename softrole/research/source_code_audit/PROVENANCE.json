@@ -1,0 +1,16 @@
+[
+  {
+    "path": "hetgatreal.py",
+    "url": "https://raw.githubusercontent.com/CORE-Robotics-Lab/HetNet/bff9f7f9a9e905d96c6d9762c2c853c9ee2f96ec/hetgat/graph/hetgatreal.py",
+    "sha256": "91095754c6b797cc1192cc53caf0942f17a6fd1554ef2b9d02312e53d7c3cc7d",
+    "source_commit": "bff9f7f9a9e905d96c6d9762c2c853c9ee2f96ec",
+    "read_only_reference": true
+  },
+  {
+    "path": "fastreal.py",
+    "url": "https://raw.githubusercontent.com/CORE-Robotics-Lab/HetNet/bff9f7f9a9e905d96c6d9762c2c853c9ee2f96ec/hetgat/graph/fastreal.py",
+    "sha256": "716ec8f651290ab3002a426ac7528be397bd5d9c87fa4bd5015fd51a8787c862",
+    "source_commit": "bff9f7f9a9e905d96c6d9762c2c853c9ee2f96ec",
+    "read_only_reference": true
+  }
+]

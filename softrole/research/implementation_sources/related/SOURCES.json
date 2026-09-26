@@ -1,0 +1,547 @@
+{
+  "retrieved_date": "2026-09-25",
+  "purpose": "Read-only author-source audit; no imported or executed code",
+  "repositories": [
+    {
+      "repository": "TonghanWang/ROMA",
+      "commit": "2d6044899fdab0032a71171931245205248ef090",
+      "commit_date": "2020-12-26T13:12:01Z",
+      "url": "https://github.com/TonghanWang/ROMA",
+      "tree": "https://api.github.com/repos/TonghanWang/ROMA/git/trees/2d6044899fdab0032a71171931245205248ef090?recursive=1",
+      "files": [
+        {
+          "path": "README.md",
+          "local_file": "ROMA/README.md",
+          "sha256": "f0078671e4d4e40cf3ed903367cef7cc131b82045f6f66521fcbab9147ad3724",
+          "bytes": 4121,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/README.md",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/README.md"
+        },
+        {
+          "path": "requirements.txt",
+          "local_file": "ROMA/requirements.txt",
+          "sha256": "bf3b4d1a0e7e4f3d3efe41470424dc3748764da282dfd2b0389586655ce2f136",
+          "bytes": 810,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/requirements.txt",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/requirements.txt"
+        },
+        {
+          "path": "LICENSE",
+          "local_file": "ROMA/LICENSE",
+          "sha256": "a1e4522979cd422b42d0b464072eb7d0d218651659f56bf09f8c147384e3f105",
+          "bytes": 11342,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/LICENSE",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/LICENSE"
+        },
+        {
+          "path": "src/modules/agents/latent_ce_dis_rnn_agent.py",
+          "local_file": "ROMA/src/modules/agents/latent_ce_dis_rnn_agent.py",
+          "sha256": "2c4930ae6eb51736a911c4e63d85e380551b84cd2308e7b8eebad07fa1a1827a",
+          "bytes": 10078,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/modules/agents/latent_ce_dis_rnn_agent.py",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/modules/agents/latent_ce_dis_rnn_agent.py"
+        },
+        {
+          "path": "src/controllers/basic_controller.py",
+          "local_file": "ROMA/src/controllers/basic_controller.py",
+          "sha256": "9f9c7da6f6a42648c228c03008311490c42d0fadd335b5d647a5b203b8857c26",
+          "bytes": 4411,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/controllers/basic_controller.py",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/controllers/basic_controller.py"
+        },
+        {
+          "path": "src/learners/latent_q_learner.py",
+          "local_file": "ROMA/src/learners/latent_q_learner.py",
+          "sha256": "f8bc4c5063ca5132436428aa4140a6c5ee002652c7e3ca6701625cbe357cc327",
+          "bytes": 9843,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/learners/latent_q_learner.py",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/learners/latent_q_learner.py"
+        },
+        {
+          "path": "src/config/default.yaml",
+          "local_file": "ROMA/src/config/default.yaml",
+          "sha256": "bc38c0941944ec76330d0fd8f6b9d6164f5daa6e80d6f998251260499df57cda",
+          "bytes": 2141,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/config/default.yaml",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/config/default.yaml"
+        },
+        {
+          "path": "src/modules/mixers/qmix.py",
+          "local_file": "ROMA/src/modules/mixers/qmix.py",
+          "sha256": "d7a54801f1f530a4da4bf0a7b6499efc35b51b20842f35d87e3647d4bf42e3ec",
+          "bytes": 1689,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/modules/mixers/qmix.py",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/modules/mixers/qmix.py"
+        },
+        {
+          "path": "src/config/algs/qmix_smac_latent.yaml",
+          "local_file": "ROMA/src/config/algs/qmix_smac_latent.yaml",
+          "sha256": "b1e26a1aed2c8b9a5835e67a3def972a06b20b8355287a3e2bf022958f2490c8",
+          "bytes": 822,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/config/algs/qmix_smac_latent.yaml",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/config/algs/qmix_smac_latent.yaml"
+        },
+        {
+          "path": "src/config/algs/qmix_smac_latent_gf.yaml",
+          "local_file": "ROMA/src/config/algs/qmix_smac_latent_gf.yaml",
+          "sha256": "7838f673bafd4245e285762678463da1ea79e2f27e41d0d4f50cf3bcf3b8f9b2",
+          "bytes": 857,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/config/algs/qmix_smac_latent_gf.yaml",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/config/algs/qmix_smac_latent_gf.yaml"
+        },
+        {
+          "path": "src/controllers/separate_controller.py",
+          "local_file": "ROMA/src/controllers/separate_controller.py",
+          "sha256": "2ee53da2549d848a34e2402804bd965681a76c6de41845e403234b2452077a51",
+          "bytes": 5901,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/ROMA/2d6044899fdab0032a71171931245205248ef090/src/controllers/separate_controller.py",
+          "permalink": "https://github.com/TonghanWang/ROMA/blob/2d6044899fdab0032a71171931245205248ef090/src/controllers/separate_controller.py"
+        }
+      ],
+      "missing": [
+        {
+          "missing": "src/config/algs/roma.yaml",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "repository": "TonghanWang/RODE",
+      "commit": "e1715eaf34e9b1d99bf95466f3c3c161392ff8e1",
+      "commit_date": "2024-12-17T08:43:51Z",
+      "url": "https://github.com/TonghanWang/RODE",
+      "tree": "https://api.github.com/repos/TonghanWang/RODE/git/trees/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1?recursive=1",
+      "files": [
+        {
+          "path": "README.md",
+          "local_file": "RODE/README.md",
+          "sha256": "375fada4bf97cf1e9933e0bffde66c79fba6746b2d58207a3c25503a8172c2f9",
+          "bytes": 3137,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/README.md",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/README.md"
+        },
+        {
+          "path": "requirements.txt",
+          "local_file": "RODE/requirements.txt",
+          "sha256": "2ae801e0a5d657b1fbe9f26754d3482116a401484fb9c7843dcf4b81136cb1dd",
+          "bytes": 812,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/requirements.txt",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/requirements.txt"
+        },
+        {
+          "path": "LICENSE",
+          "local_file": "RODE/LICENSE",
+          "sha256": "a1e4522979cd422b42d0b464072eb7d0d218651659f56bf09f8c147384e3f105",
+          "bytes": 11342,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/LICENSE",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/LICENSE"
+        },
+        {
+          "path": "src/controllers/rode_controller.py",
+          "local_file": "RODE/src/controllers/rode_controller.py",
+          "sha256": "3e174d591b5649a85d0ea36faaad79ca402fc6918fc9926769cab56116ce066f",
+          "bytes": 11757,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/controllers/rode_controller.py",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/controllers/rode_controller.py"
+        },
+        {
+          "path": "src/modules/agents/rode_agent.py",
+          "local_file": "RODE/src/modules/agents/rode_agent.py",
+          "sha256": "8205040e632d26a7b6d5cb1e61e3c970dc02affaf898e9feb0e2c3d311550c1f",
+          "bytes": 679,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/agents/rode_agent.py",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/agents/rode_agent.py"
+        },
+        {
+          "path": "src/modules/action_encoders/obs_reward_encoder.py",
+          "local_file": "RODE/src/modules/action_encoders/obs_reward_encoder.py",
+          "sha256": "1666a8319df9c04c76bbb81e8b621dafd6e1d6d17b670e8adbced30b82274a12",
+          "bytes": 3034,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/action_encoders/obs_reward_encoder.py",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/action_encoders/obs_reward_encoder.py"
+        },
+        {
+          "path": "src/modules/role_selectors/dot_selector.py",
+          "local_file": "RODE/src/modules/role_selectors/dot_selector.py",
+          "sha256": "77c8d1da0090aa33ffa25e61f3789652d1113af6c7a1592e4ea3f30b0462a262",
+          "bytes": 2633,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/role_selectors/dot_selector.py",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/role_selectors/dot_selector.py"
+        },
+        {
+          "path": "src/modules/roles/dot_role.py",
+          "local_file": "RODE/src/modules/roles/dot_role.py",
+          "sha256": "d5028fc15ccd5adfcf9d670ce5f6dd68524b3955f324a6a0325f77c3f9d6f269",
+          "bytes": 860,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/roles/dot_role.py",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/modules/roles/dot_role.py"
+        },
+        {
+          "path": "src/learners/rode_learner.py",
+          "local_file": "RODE/src/learners/rode_learner.py",
+          "sha256": "2284e68f00935635c5165fb686abaf062f087667ceae984d99112f7cccf73a85",
+          "bytes": 13967,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/learners/rode_learner.py",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/learners/rode_learner.py"
+        },
+        {
+          "path": "src/config/algs/rode.yaml",
+          "local_file": "RODE/src/config/algs/rode.yaml",
+          "sha256": "b54e96acfb98be2852f7a328d158e54ac38af2bad1b4de36b8fce3c98185d24d",
+          "bytes": 816,
+          "raw_url": "https://raw.githubusercontent.com/TonghanWang/RODE/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/config/algs/rode.yaml",
+          "permalink": "https://github.com/TonghanWang/RODE/blob/e1715eaf34e9b1d99bf95466f3c3c161392ff8e1/src/config/algs/rode.yaml"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "GT-STAR-Lab/cap-comm",
+      "commit": "70814520a3ff84ee5e13fe516c933e8e0d53859e",
+      "commit_date": "2023-10-26T21:41:16Z",
+      "url": "https://github.com/GT-STAR-Lab/cap-comm",
+      "tree": "https://api.github.com/repos/GT-STAR-Lab/cap-comm/git/trees/70814520a3ff84ee5e13fe516c933e8e0d53859e?recursive=1",
+      "files": [
+        {
+          "path": "README.md",
+          "local_file": "cap-comm/README.md",
+          "sha256": "a395680f5c04da3ece2850c7f4f9f9ef111e31e519e2854373c9e230f5630364",
+          "bytes": 9983,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/README.md",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/README.md"
+        },
+        {
+          "path": "requirements.txt",
+          "local_file": "cap-comm/requirements.txt",
+          "sha256": "bacae10b8ca774be315841ec38c718d9eb772d00355dad8f79fef554083b73c3",
+          "bytes": 590,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/requirements.txt",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/requirements.txt"
+        },
+        {
+          "path": "LICENSE",
+          "local_file": "cap-comm/LICENSE",
+          "sha256": "a1e4522979cd422b42d0b464072eb7d0d218651659f56bf09f8c147384e3f105",
+          "bytes": 11342,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/LICENSE",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/LICENSE"
+        },
+        {
+          "path": "src/modules/agents/gnn_agent.py",
+          "local_file": "cap-comm/src/modules/agents/gnn_agent.py",
+          "sha256": "eacb8805ea9c3960b27d86af71bed1f0f957333dda96ee0818078f246dd3613e",
+          "bytes": 6426,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/modules/agents/gnn_agent.py",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/modules/agents/gnn_agent.py"
+        },
+        {
+          "path": "src/communication/gcn.py",
+          "local_file": "cap-comm/src/communication/gcn.py",
+          "sha256": "eda6044680e4351a3286fa072ad980ba4a9213d54ee25fd138aa809b19ffb1b5",
+          "bytes": 2583,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/communication/gcn.py",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/communication/gcn.py"
+        },
+        {
+          "path": "src/communication/gnn.py",
+          "local_file": "cap-comm/src/communication/gnn.py",
+          "sha256": "4350beb1755fb6ae014571b6fb970ac6d8dc09c3f998b583e042b0d402d399e3",
+          "bytes": 2381,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/communication/gnn.py",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/communication/gnn.py"
+        },
+        {
+          "path": "src/controllers/basic_controller.py",
+          "local_file": "cap-comm/src/controllers/basic_controller.py",
+          "sha256": "bcd9591ee160dcf0943f5d445d8c4ffdc6154bccdf8e946c68ae988127e210aa",
+          "bytes": 7339,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/controllers/basic_controller.py",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/controllers/basic_controller.py"
+        },
+        {
+          "path": "src/config/algs/mappo_gnn.yaml",
+          "local_file": "cap-comm/src/config/algs/mappo_gnn.yaml",
+          "sha256": "a8b9723d55150ee2967038a815c828972f75c17664ad2d02349ca568aaa007f6",
+          "bytes": 1210,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/config/algs/mappo_gnn.yaml",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/config/algs/mappo_gnn.yaml"
+        },
+        {
+          "path": "src/config/default.yaml",
+          "local_file": "cap-comm/src/config/default.yaml",
+          "sha256": "c97e890ba3b63c3712d01336c24b7d585dfc88c235059206c98d61ec183ffd14",
+          "bytes": 2810,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/config/default.yaml",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/src/config/default.yaml"
+        },
+        {
+          "path": "eval/eval_mpe_material_transport.py",
+          "local_file": "cap-comm/eval/eval_mpe_material_transport.py",
+          "sha256": "637046daf09c8b1ed8229ff7b95e1e9680180f7901b17078620e149721df81f9",
+          "bytes": 12311,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/cap-comm/70814520a3ff84ee5e13fe516c933e8e0d53859e/eval/eval_mpe_material_transport.py",
+          "permalink": "https://github.com/GT-STAR-Lab/cap-comm/blob/70814520a3ff84ee5e13fe516c933e8e0d53859e/eval/eval_mpe_material_transport.py"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "uoe-agents/GPL",
+      "commit": "83bf42d9b02a4a520381f37bed3cb662d86df701",
+      "commit_date": "2021-03-31T13:55:10Z",
+      "url": "https://github.com/uoe-agents/GPL",
+      "tree": "https://api.github.com/repos/uoe-agents/GPL/git/trees/83bf42d9b02a4a520381f37bed3cb662d86df701?recursive=1",
+      "files": [
+        {
+          "path": "README.md",
+          "local_file": "GPL/README.md",
+          "sha256": "53db37016da5b2a3799583381a60e1d9aeda01aab5de31aeddd56b3f27570459",
+          "bytes": 3363,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/GPL/83bf42d9b02a4a520381f37bed3cb662d86df701/README.md",
+          "permalink": "https://github.com/uoe-agents/GPL/blob/83bf42d9b02a4a520381f37bed3cb662d86df701/README.md"
+        },
+        {
+          "path": "Open_Experiments/Wolfpack/GPL-Q/Agent.py",
+          "local_file": "GPL/Open_Experiments/Wolfpack/GPL-Q/Agent.py",
+          "sha256": "c14aa70acd48cb265e91cdd3e94e183b7a39779549b4d55863039d83c837bd60",
+          "bytes": 10980,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/GPL/83bf42d9b02a4a520381f37bed3cb662d86df701/Open_Experiments/Wolfpack/GPL-Q/Agent.py",
+          "permalink": "https://github.com/uoe-agents/GPL/blob/83bf42d9b02a4a520381f37bed3cb662d86df701/Open_Experiments/Wolfpack/GPL-Q/Agent.py"
+        },
+        {
+          "path": "Open_Experiments/Wolfpack/GPL-Q/Network.py",
+          "local_file": "GPL/Open_Experiments/Wolfpack/GPL-Q/Network.py",
+          "sha256": "da2221bc8708314b6a6ec305082b399b2c65c01a49ed3bf89829247f46e8801c",
+          "bytes": 19868,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/GPL/83bf42d9b02a4a520381f37bed3cb662d86df701/Open_Experiments/Wolfpack/GPL-Q/Network.py",
+          "permalink": "https://github.com/uoe-agents/GPL/blob/83bf42d9b02a4a520381f37bed3cb662d86df701/Open_Experiments/Wolfpack/GPL-Q/Network.py"
+        },
+        {
+          "path": "Open_Experiments/Wolfpack/GPL-Q/main_mrf.py",
+          "local_file": "GPL/Open_Experiments/Wolfpack/GPL-Q/main_mrf.py",
+          "sha256": "46aa888e0adf0764af0116e52f4b4cde404d74558a1ba710430401bbea48d9a8",
+          "bytes": 9232,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/GPL/83bf42d9b02a4a520381f37bed3cb662d86df701/Open_Experiments/Wolfpack/GPL-Q/main_mrf.py",
+          "permalink": "https://github.com/uoe-agents/GPL/blob/83bf42d9b02a4a520381f37bed3cb662d86df701/Open_Experiments/Wolfpack/GPL-Q/main_mrf.py"
+        },
+        {
+          "path": "requirements.txt",
+          "local_file": "GPL/requirements.txt",
+          "sha256": "e3a2298f2d475b4ff9204bbe4ef989acd41e9a41856efd93890c7d9b5cbcea63",
+          "bytes": 980,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/GPL/83bf42d9b02a4a520381f37bed3cb662d86df701/requirements.txt",
+          "permalink": "https://github.com/uoe-agents/GPL/blob/83bf42d9b02a4a520381f37bed3cb662d86df701/requirements.txt"
+        }
+      ],
+      "missing": [
+        {
+          "missing": "Open_Experiments/Wolfpack/GPL-Q/requirements.txt",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "repository": "uoe-agents/PO-GPL",
+      "commit": "bbd37e0c45d8b1be0e4907cd038aad443b29cf8c",
+      "commit_date": "2023-03-01T17:40:41Z",
+      "url": "https://github.com/uoe-agents/PO-GPL",
+      "tree": "https://api.github.com/repos/uoe-agents/PO-GPL/git/trees/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c?recursive=1",
+      "files": [
+        {
+          "path": "README.md",
+          "local_file": "PO-GPL/README.md",
+          "sha256": "e483eb88447a99c967a497a080203cb746688baa6b1ee2f97fd0150416c78a65",
+          "bytes": 1089,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/PO-GPL/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/README.md",
+          "permalink": "https://github.com/uoe-agents/PO-GPL/blob/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/README.md"
+        },
+        {
+          "path": "requirements.txt",
+          "local_file": "PO-GPL/requirements.txt",
+          "sha256": "37e0f2eb4cc23dfd81acce73eb4c3074cdd46b41716ac387ecc66fec10909b44",
+          "bytes": 813,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/PO-GPL/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/requirements.txt",
+          "permalink": "https://github.com/uoe-agents/PO-GPL/blob/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/requirements.txt"
+        },
+        {
+          "path": "GPL/README.md",
+          "local_file": "PO-GPL/GPL/README.md",
+          "sha256": "38c3738bcf7985281f6e7765eeaeaba4eb7410f638b47274f59dc35acbffafd8",
+          "bytes": 2154,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/PO-GPL/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/README.md",
+          "permalink": "https://github.com/uoe-agents/PO-GPL/blob/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/README.md"
+        },
+        {
+          "path": "GPL/RNNTypeModel.py",
+          "local_file": "PO-GPL/GPL/RNNTypeModel.py",
+          "sha256": "eda45481d3ca06d65f2a1fd87ba612a6a3c94a49dc28cf7eb26a7dd9bdfd49bf",
+          "bytes": 106363,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/PO-GPL/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/RNNTypeModel.py",
+          "permalink": "https://github.com/uoe-agents/PO-GPL/blob/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/RNNTypeModel.py"
+        },
+        {
+          "path": "GPL/GPLBeliefModel.py",
+          "local_file": "PO-GPL/GPL/GPLBeliefModel.py",
+          "sha256": "9602b5de4ad396fa282aebac0ff73d6c03ef190d058543cf8d6687945f5875ae",
+          "bytes": 73377,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/PO-GPL/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/GPLBeliefModel.py",
+          "permalink": "https://github.com/uoe-agents/PO-GPL/blob/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/GPLBeliefModel.py"
+        },
+        {
+          "path": "GPL/Network.py",
+          "local_file": "PO-GPL/GPL/Network.py",
+          "sha256": "61fc325f3eadc673f7fd99fa44df9f64f2f7f9c4ea329e4275b6fb1bf46159e6",
+          "bytes": 29103,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/PO-GPL/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/Network.py",
+          "permalink": "https://github.com/uoe-agents/PO-GPL/blob/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/Network.py"
+        },
+        {
+          "path": "GPL/run_gpl_no_train.py",
+          "local_file": "PO-GPL/GPL/run_gpl_no_train.py",
+          "sha256": "a78d4bb849e2897d401d9c694f86c98e6ae37220560c8fe341f50e462e533cab",
+          "bytes": 435,
+          "raw_url": "https://raw.githubusercontent.com/uoe-agents/PO-GPL/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/run_gpl_no_train.py",
+          "permalink": "https://github.com/uoe-agents/PO-GPL/blob/bbd37e0c45d8b1be0e4907cd038aad443b29cf8c/GPL/run_gpl_no_train.py"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "surebo/ROCO",
+      "commit": "5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a",
+      "commit_date": "2024-11-18T00:35:24Z",
+      "url": "https://github.com/surebo/ROCO",
+      "tree": "https://api.github.com/repos/surebo/ROCO/git/trees/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a?recursive=1",
+      "files": [
+        {
+          "path": "README.md",
+          "local_file": "ROCO/README.md",
+          "sha256": "602687e8c5590d4ecea230582f63d95dec421a71bb8704a5b62afaeaadf7a10c",
+          "bytes": 1520,
+          "raw_url": "https://raw.githubusercontent.com/surebo/ROCO/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/README.md",
+          "permalink": "https://github.com/surebo/ROCO/blob/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "local_file": "ROCO/LICENSE",
+          "sha256": "a1e4522979cd422b42d0b464072eb7d0d218651659f56bf09f8c147384e3f105",
+          "bytes": 11342,
+          "raw_url": "https://raw.githubusercontent.com/surebo/ROCO/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/LICENSE",
+          "permalink": "https://github.com/surebo/ROCO/blob/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/LICENSE"
+        },
+        {
+          "path": "src/controllers/roco_controller.py",
+          "local_file": "ROCO/src/controllers/roco_controller.py",
+          "sha256": "0e4d75689ae34909ae611e6279de6d6b71fb2ed9bce2200edf652d8e6e8c1da0",
+          "bytes": 12018,
+          "raw_url": "https://raw.githubusercontent.com/surebo/ROCO/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/controllers/roco_controller.py",
+          "permalink": "https://github.com/surebo/ROCO/blob/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/controllers/roco_controller.py"
+        },
+        {
+          "path": "src/modules/agents/roco_agent.py",
+          "local_file": "ROCO/src/modules/agents/roco_agent.py",
+          "sha256": "6e343b708e75147867ae8fad7f11070f4e929a2a48688c6cb4f7a102ce05d19c",
+          "bytes": 5827,
+          "raw_url": "https://raw.githubusercontent.com/surebo/ROCO/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/modules/agents/roco_agent.py",
+          "permalink": "https://github.com/surebo/ROCO/blob/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/modules/agents/roco_agent.py"
+        },
+        {
+          "path": "src/learners/roco_learner.py",
+          "local_file": "ROCO/src/learners/roco_learner.py",
+          "sha256": "27cd07934f9e906af60b29c685f1c68f869ff685af11bd8da035b1240f422aa4",
+          "bytes": 16211,
+          "raw_url": "https://raw.githubusercontent.com/surebo/ROCO/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/learners/roco_learner.py",
+          "permalink": "https://github.com/surebo/ROCO/blob/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/learners/roco_learner.py"
+        },
+        {
+          "path": "src/config/algs/roco.yaml",
+          "local_file": "ROCO/src/config/algs/roco.yaml",
+          "sha256": "c7b3167a8d79895e6d53ad346638f984531e6fd357598e26df429cdcfdbfa561",
+          "bytes": 1019,
+          "raw_url": "https://raw.githubusercontent.com/surebo/ROCO/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/config/algs/roco.yaml",
+          "permalink": "https://github.com/surebo/ROCO/blob/5aafe9ed4fb8031e3c915888fe67fb7b8cc3147a/src/config/algs/roco.yaml"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "GT-STAR-Lab/CASH",
+      "commit": "20a31170b442cf16b50cd43aa3f5ae547e2046f4",
+      "commit_date": "2025-12-12T21:20:46Z",
+      "url": "https://github.com/GT-STAR-Lab/CASH",
+      "tree": "https://api.github.com/repos/GT-STAR-Lab/CASH/git/trees/20a31170b442cf16b50cd43aa3f5ae547e2046f4?recursive=1",
+      "files": [
+        {
+          "path": "README.md",
+          "local_file": "CASH/README.md",
+          "sha256": "1fd5c807b874111f6be26fd2e80518e482d819af3b186405c0740d038436de6a",
+          "bytes": 13418,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/README.md",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "local_file": "CASH/LICENSE",
+          "sha256": "194e94abef030f092fde5f16e9966ba07f1c83455467a7f2cf9f9282335288c4",
+          "bytes": 10232,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/LICENSE",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "local_file": "CASH/pyproject.toml",
+          "sha256": "69ea45e84ba11ccb102ee63c2a8de11bc55363485b5f7f9c5c195416e16af2be",
+          "bytes": 1162,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/pyproject.toml",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/pyproject.toml"
+        },
+        {
+          "path": "jaxmarl/policies/policies.py",
+          "local_file": "CASH/jaxmarl/policies/policies.py",
+          "sha256": "89e35d83bdfa9b3c05e216772792ef315be65809ace1c50852bd09aeeaeb2324",
+          "bytes": 8214,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/jaxmarl/policies/policies.py",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/jaxmarl/policies/policies.py"
+        },
+        {
+          "path": "jaxmarl/environments/mpe/simple_fire.py",
+          "local_file": "CASH/jaxmarl/environments/mpe/simple_fire.py",
+          "sha256": "0550be405dc0b2a24aa8cbc76c8627c8f465f93744a87d73f2c9bfe02f5e251c",
+          "bytes": 13094,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/jaxmarl/environments/mpe/simple_fire.py",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/jaxmarl/environments/mpe/simple_fire.py"
+        },
+        {
+          "path": "jaxmarl/environments/mpe/simple_transport.py",
+          "local_file": "CASH/jaxmarl/environments/mpe/simple_transport.py",
+          "sha256": "1730f1a7a25e94673deada6eca795b81d78ebf47baef6c61d0178ca11bb05ea4",
+          "bytes": 23855,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/jaxmarl/environments/mpe/simple_transport.py",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/jaxmarl/environments/mpe/simple_transport.py"
+        },
+        {
+          "path": "baselines/MAPPO/mappo_rnn_mpe.py",
+          "local_file": "CASH/baselines/MAPPO/mappo_rnn_mpe.py",
+          "sha256": "b7964d03fe9d1c1cae2fb8ba48a7d93a32d9395b5cabf0f02531a8cdd4d99bbf",
+          "bytes": 40658,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/baselines/MAPPO/mappo_rnn_mpe.py",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/baselines/MAPPO/mappo_rnn_mpe.py"
+        },
+        {
+          "path": "requirements/requirements.txt",
+          "local_file": "CASH/requirements/requirements.txt",
+          "sha256": "5a7e8e7e051c580944a3646aa11f45a615ce760730e37d44a89ec3ce472d85b1",
+          "bytes": 443,
+          "raw_url": "https://raw.githubusercontent.com/GT-STAR-Lab/CASH/20a31170b442cf16b50cd43aa3f5ae547e2046f4/requirements/requirements.txt",
+          "permalink": "https://github.com/GT-STAR-Lab/CASH/blob/20a31170b442cf16b50cd43aa3f5ae547e2046f4/requirements/requirements.txt"
+        }
+      ],
+      "missing": [
+        {
+          "missing": "requirements/requirements-mappo.txt",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1778 @@
+                                         Shapley Machine: A Game-Theoretic Framework for
+                                                    N-Agent Ad Hoc Teamwork
+
+
+                                                         Jianhong Wang∗ †                                       Yang Li†
+                                                        INFORMED-AI Hub                                Centre for AI Fundamentals
+                                                       University of Bristol, UK                      University of Manchester, UK
+                                                   jianhong.wang@bristol.ac.uk                       yang.li-4@manchester.ac.uk
+
+
+
+
+arXiv:2506.11285v1 [cs.MA] 12 Jun 2025
+                                                       Samuel Kaski                                     Jonathan Lawry
+                                                 Centre for AI Fundamentals             School of Engineering Mathematics and Technology
+                                                University of Manchester, UK                         University of Bristol, UK
+                                             samuel.kaski@manchester.ac.uk                          J.Lawry@bristol.ac.uk
+
+
+
+                                                                                        Abstract
+
+                                                  Open multi-agent systems are increasingly important in modeling real-world ap-
+                                                  plications, such as smart grids, swarm robotics, etc. In this paper, we aim to
+                                                  investigate a recently proposed problem for open multi-agent systems, referred
+                                                  to as n-agent ad hoc teamwork (NAHT), where only a number of agents are con-
+                                                  trolled. Existing methods tend to be based on heuristic design and consequently
+                                                  lack theoretical rigor and ambiguous credit assignment among agents. To address
+                                                  these limitations, we model and solve NAHT through the lens of cooperative game
+                                                  theory. More specifically, we first model an open multi-agent system, characterized
+                                                  by its value, as an instance situated in a space of cooperative games, generated
+                                                  by a set of basis games. We then extend this space, along with the state space, to
+                                                  accommodate dynamic scenarios, thereby characterizing NAHT. Exploiting the
+                                                  justifiable assumption that basis game values correspond to a sequence of n-step
+                                                  returns with different horizons, we represent the state values for NAHT in a form
+                                                  similar to λ-returns. Furthermore, we derive Shapley values to allocate state val-
+                                                  ues to the controlled agents, as credits for their contributions to the ad hoc team.
+                                                  Different from the conventional approach to shaping Shapley values in an explicit
+                                                  form, we shape Shapley values by fulfilling the three axioms uniquely describing
+                                                  them, well defined on the extended game space describing NAHT. To estimate
+                                                  Shapley values in dynamic scenarios, we propose a TD(λ)-like algorithm. The
+                                                  resulting reinforcement learning (RL) algorithm is referred to as Shapley Machine.
+                                                  To our best knowledge, this is the first time that the concepts from cooperative
+                                                  game theory are directly related to RL concepts. In experiments, we demonstrate
+                                                  the effectiveness of Shapley Machine and verify reasonableness of our theory.
+
+
+                                         1    Introduction
+                                         Multi-agent systems (MAS) have emerged as a prominent research area, effectively modeling and
+                                         addressing numerous practical applications involving collaborative tasks, such as distributed electric
+                                         power network control [1], railway network distribution management [2], and swarm robotics [3, 4].
+                                         Reinforcement learning (RL) [5], particularly multi-agent reinforcement learning (MARL), has
+                                           ∗
+                                             Jianhong Wang is a visiting researcher at the Centre for AI Fundamentals at University of Manchester. †
+                                         Correspondence to Jianhong Wang and Yang Li.
+
+
+                                         Preprint. Under review.
+shown great promise in solving MAS problems. However, MARL typically struggles with real-world
+conditions such as openness, where the number of uncontrolled agents can vary, and generalization,
+involving unknown teammate behaviors. To address these limitations, a new problem termed n-agent
+ad hoc teamwork (NAHT) was recently introduced by [6], extending MARL to scenarios with varying
+and potentially unknown teammates. In this paper, we aim to establish a theoretical basis for modeling
+open multi-agent systems and propose a novel algorithm for NAHT .
+Given the novelty of this problem, only an initial practical solution called POAM [6] has been
+proposed. POAM enhances the IPPO algorithm [7] by incorporating an embedding vector, which
+serves as a continuous representation derived from each agent’s historical observations using an
+encoder-decoder model. This embedding aims to predict the potential behaviors of other agents from
+each agent’s unique perspective. Despite POAM demonstrating superior performance compared to
+existing MARL and ad hoc teamwork algorithms, it has several notable limitations: (1) The algorithm
+is designed heuristically without rigorous theoretical foundations, undermining the trustworthiness
+crucial for ensuring reliability and safety in multi-agent systems [8]. (2) While controlled agents
+within a team receive different evaluation values during training to guide their decentralized policies,
+it remains unclear whether these values accurately reflect individual agents’ contributions to team
+performance. As with other challenges in MARL, this uncertainty can adversely affect learning
+dynamics and efficiency [9], which is central to online learning for safety-critical systems. (3) The
+value functions (critics) employed in POAM are trained using TD(λ) [10]. Beyond the RL training
+benefits, the broader relevance of TD(λ) within open multi-agent systems remains an open question.
+Shapley value is a profound payoff distribution scheme in cooperative game theory, which has been
+broadly applied in MARL [11, 12, 13, 14, 15]. Almost all the previous work concentrated on using
+the explicit form of Shapley values to shape rewards or value functions. On the other hand, Shapley
+values have been merely used to address cooperative MARL with deterministic number of agents,
+due to the lack of a corresponding theory on openness. To bridge this gap, this paper will establish a
+theory underlying Shapley values for open multi-agent systems, and thus derive an algorithm that
+solves NAHT, depending on the axiomatic characterization of Shapley values. More importantly, this
+algorithms is shown to have close relationship to the TD(λ) as established in RL literature.
+The main contributions of this paper are as follows: (1) A theoretical model, through the lens
+of cooperative game theory, is established to describe open multi-agent systems (e.g. the NAHT
+processes) as instances situated in a vector space of cooperative games. (2) We impose a justifiable
+assumption that maps the basis of the vector space to a sequence of n-step returns with variant
+horizons. Based on the above theoretical grounding, Shapley value’s axiomatic characterization
+(i.e. Efficiency, Symmetry and Additivity), rigorously defined in the vector space of cooperative
+games [16], is imposed on the value function represented as the form of λ-return [5][Chap. 12], and
+thus a TD(λ)-like algorithm, referred to as Shapley Machine, is derived. To our knowledge, it is the
+first time that concepts from cooperative game theory (e.g. Shapley value) are closely related to a
+reinforcement learning technique (e.g. TD(λ)). (3) The existing algorithm to address NAHT, referred
+to as POAM, can also be categorized according to the axioms above. Therefore, it sheds light on
+the potential of designing algorithms for multi-agent systems, following a well-defined theoretical
+model and axiomatic characterization. This complies with the spirit of algorithm design from the first
+principle, popularized in the community of geometric deep learning [17].
+In experiments, we have evaluated the Shapley Machine via the testbeds of NAHT on MPE and
+SMAC, provided by [6]. We empirically demonstrate that Shapley Machine can generally outperform
+the only existing algorithm designed for NAHT, POAM. Additionally, we empirically verify the
+theory, through a spectrum of case studies. The complete mathematical proofs are left to Appendix C.
+The code is published on https://github.com/hsvgbkhgbv/shapley-machine-naht.
+
+
+2     Background
+
+2.1   N-Agent Ad Hoc Teamwork
+
+In this section, we describe a problem setting for open multi-agent systems, referred to as n-agent
+ad hoc teamwork (NAHT) [6]. The main challenges of NAHT are as follows: (1) coordination with
+potentially unknown types of teammates (generalization), and (2) coping with a varying number of
+uncontrolled teammates (openness). A decentralized partially observable Markov decision process
+
+
+                                                   2
+(Dec-POMDP) [18] is considered to formalize the problem. There is a set of agents Ñ , a state
+space S, a joint action space A = ×i∈Ñ Ai , a per-agent observation space Oi , a transition function
+PT : S × A → ∆(S), a common reward function R : S × A → R, a discount factor γ ∈ [0, 1] and
+an episode length T ∈ Z+ indicating the maximum length of an interaction. Each agent receives
+observations via an observation function Oi : S × A → ∆(Oi ). Hi is defined as an agent i’s space
+of observation and action histories. An agent is equipped with a policy πi : Hi → ∆(Ai ).
+In this problem, there are two groups of agents: a set of controlled agents denoted as C̃ and a set of
+uncontrolled agents denoted as Ũ . As NAHT is an open system, at the beginning of each interactive
+process (episode), a team of agents Ñ , consisting of c̃ agents drawn from the controlled agent pool
+C̃ and ũ agents drawn from the uncontrolled agent pool Ũ . For simplicity, each controlled agent is
+characterized by its policy, and the resulting set of controlled agents is expressed as C̃(θ) = {πiθ }c̃i=1 .
+Therefore, the above sampling procedure is denoted as X(Ũ , C̃(θ)). The aim of NAHT is learning
+parameters θ to solve the following optimization problem:
+                                                              " T        #
+                                                               X
+                                                                     t
+                                  max Eπ(Ñ ) ∼X(Ũ ,C̃(θ))         γ Rt ,                               (1)
+                                    θ
+                                                              t=0
+
+
+where π (Ñ ) denotes the joint policy of a team of controlled agents.
+
+2.2   A Set of Cooperative Games and Shapley Value
+                                                         z                                   z
+Definition 2.1. We first define such a function that vC,s     = z, for any z ∈ R. If C ⊆ D, vC,s (D) = z,
+otherwise, vC,s (D) = 0. For a cooperative game described by a characteristic function v : 2N →
+            z
+
+R≥0 , we can describe a set of such gamesPover a group of agents N by a set of basis games
+  1                                                       1
+{vC | ∅ ̸= C ⊆ N }, such as G = {w | w =            k C vC  , kC ∈ R, ∅ ̸= C ⊆ N }. The analytic form of
+                                          |C|−|T |
+                             P
+kC is represented as kC = T ⊆C (−1)                v(T ).
+
+A Set of Cooperative Games. A cooperative game is usually described as a characteristic function
+v : 2N → R≥0 , where N is a generic agent set. An arbitrary cooperative game v can be uniquely
+                                                       1
+determined by a set of basis games denoted as {vC         | ∅ ̸= C ⊆ N } [16], as Definition 2.1 shows.
+                                                                                               |N |
+It can be observed that the vector space G is isomorphic to the real coordinate space R2 −1 . The
+                                                                                                    |N |
+basis of G includes 2|N | − 1 basis games, so dim G is 2|N | − 1, equal to the dimension of R2 −1 .
+This implies that it is feasible to study cooperative games through the perspective of a real coordinate
+space. In this paper, we focus on studying the cooperative game v approximation on the set of all
+                         1
+agents, so v(N ) and vC    (N ) are in consideration only, instead of other coalitions C ̸= N . According
+to previous work in MARL [11], we consider the superadditive game class, which has been shown
+to fit cooperative MARL (see Appendix A.2 for more details). The condition for G restricted to
+superadditive games is kC ≥ 0.
+Theorem 2.2 ([16]). Shapley value is a unique payoff allocation function, defined on G, which
+satisifes Efficiency, Symmetry and Additivity.
+
+Shapley Value. Shapley value ϕ : G → R|N | is a multidimensional linear transformation defined
+on the cooperative game space G, given that there are |N | agents in total. Each dimension of ϕ
+indicates the payoff allocation to an agent. It has been proved that Shapley value is the unique
+payoff allocation method under G that satisfies the following axioms: Efficiency, Additivity and
+Symmetry [16], highlighted in Theorem 2.2. Efficiency and Symmetry have been well exploited in
+multi-agent reinforcement learning [11, 14], but Additivity still lacks attention. Formally, Additivity
+means that ϕ(w1 + w2 ) = ϕ(w1 ) + ϕ(w2P    ), for any w1P , w2 ∈ G. If we consider m possible games,
+                                              m              m
+then
+Pm   we have  the following expression: ϕ(    i=1 w i ) =    i=1 ϕ(wi ), where w1 , w2 , ..., wm ∈ G and
+   i=1 wi can be seen as a game that is reproduced by the above games. Since the game space G is a
+vector P
+       space, Additivity
+                       Phas   been generalized to Linearity in the previous literature [16, 19], such
+          m               m
+that ϕ( i=1 αi wi ) = i=1 αi ϕ(wi ), for αi ∈ R. Linearity can lead to Additivity, but the reverse is
+not necessarily correct with no consideration of Homogeneity. In this paper, we will focus on how
+Linearity can be leveraged to address problems of open multi-agent systems, e.g. NAHT.
+
+
+                                                     3
+3   A Model for N-Agent Ad Hoc Teamwork: State-Space Cooperative Games
+
+Fitting the dynamic environment setting in NAHT, we extend the game space G to the state space S
+of Markov games [20], forming a set of state-space cooperative
+                                                            P games.     In more detail, for each state
+                                                                   1
+s ∈ S we have a vector space such as G(s) = {ws | ws =        kC vC,s , kC ∈ R, ∅ ̸= C ⊆ Ñ }, which
+                                                1
+is generated by a set of basis games, such as {vC,s | ∅ ̸= C ⊆ Ñ }. Given a fixed state s, the vector
+                                                              |Ñ |
+space G(s) is still isomorphic to a real coordinate space R(2 −1) , consistent with the structure of G
+defined over the agent set Ñ . As a result, all properties for G also hold for G(s).
+
+Definition 3.1. An n-agent ad hoc teamwork process is described as a set of state-space cooperative
+games such as GNAHT = ⊕s∈S G(s), characterizing an team of agents Ñ . Each NAHT process belongs
+                                                                                                1
+to GNAHT is corresponding to varying Ñ with different agent-type composition. Each basis game vC,s
+predicts the state value for the scenario at state s ∈ S, with at least |C| agents of an agent-type
+composition determined by parameterization of kC .
+
+Restricted to the context of NAHT, we describe a known process by a global space denoted by
+GNAHT = ⊕s∈S G(s), where G(s) is a subspace with a fixed state s ∈ S to capture the composition of
+agent types and the team size, as described in Definition 3.1, as well as ⊕ indicates the direct sum
+operation. Literally, a subgame for the state s, denoted by vs ∈ G(s), is formed by the basis games
+ 1                                                                                                  1
+                                                                                          P
+vC,s up to the coalition whose size is equal to the agent group size |Ñ |, such that vs = C⊆Ñ kC vC,s .
+                           |Ñ |
+GNAHT is isomorphic to R(2 −1)×d , if we simply consider a finite state
+space such that |S| = d. Note that the controlled agent set denoted
+as C̃ is a subset of Ñ . Considering uncontrolled agents denoted as
+Ũ := Ñ \C̃ is necessary for evaluating the controlled agents’ policies.
+If we ignore the uncontrolled agents, the game space with a fixed state
+                                          |C̃|
+will be reduced to a subspace W ⊂ R(2 −1) , where coordinates not
+contributing to C̃ are always zeros. The effect of uncontrolled agents is
+totally ignored. This will induce a bias measured by the angle between
+two game vectors representing two scenarios. For example, θ is the
+                                                                  1
+angle between two game vectors such that vs ∈ W = span{v{1},s           }
+                   1      1
+and ws ∈ span{v{1},s , v{1,2},s }\W , as shown in Figure 1. As well as   Figure 1: Example of
+providing a visualization of NAHT, the main purpose of this model        the state-space cooperative
+is for formalizing the use of Shapley value when solving NAHT.           game model, described by
+                                                                         a spanning set including
+More specifically, this supports why coalitions up to Ñ must be
+                                                                         two vectors with the fixed
+considered during the NAHT process, when imposing axiomatic
+                                                                         state s. The red and blue ar-
+characterization in Section 4.
+                                                                         rowed lines are two games,
+                                                                         such as v and w, whose dif-
+                                                                         ference is measured by the
+                                                                         θ. The shading area indi-
+4 Shapley Value for N-Agent Ad Hoc Teamwork                              cates the spectrum of gen-
+                                                                         erated cooperative Pgames
+                                                                         for kC ≥ 0 and        kC =
+As described in Definition 3.1, a NAHT process can be represented 1, which occupies the first
+by GNAHT = ⊕s∈S G(s), where each subspace G(s) is generated by a quadrant.
+                                                          1
+set of basis games with a fixed state s ∈ S, such as {vC,s   | ∅ ̸= C ⊆
+Ñ }. Therefore, we can uniquely  describe a game vs ∈ DG(s) by the
+                                          1
+                          P
+following formula: vs = ∅̸=C⊆Ñ kC vC,s      , given a fixed state s. By
+                           z        1                                         z
+Definition 2.1, we denote vC,s = zvC,s , for any z ∈ R, such that if C ⊆ D, vC,s (D) = z, otherwise,
+ z
+vC,s (D) = 0.
+
+Lemma 4.1. Given a fixed state s ∈ S each subgame vs ∈ G(s), it can be uniquely represented by
+                          vs (Ñ )
+vs = ∅̸=C⊆Ñ v k(CÑ ) · vC,s
+    P
+                                   .
+                  s
+
+
+
+
+                                                   4
+                                                                         P            kC         vs (Ñ )
+By Lemma 4.1, we can represent a subgame as follows: vs =                    ∅̸=C⊆Ñ vs (Ñ ) · vC,s . Imposing a
+
+linear operator ϕ : G(s) → R|Ñ | on the subgame vs , we derive the following formula such that
+                                                                      
+                                             X       kC       vs (Ñ ) 
+                            ϕ(vs ) = ϕ                    · vC,s        .                      (2)
+                                                  vs (Ñ )
+                                                   ∅̸=C⊆Ñ
+By the Linearity axiom of ϕ, we can transform Eq. (2) as follows:
+                                         X      kC        
+                                                             vs (Ñ )
+                                                                      
+                              ϕ(vs ) =                 · ϕ vC,s         .                                     (3)
+                                              vs (Ñ )
+                                           ∅̸=C⊆Ñ
+
+
+4.1     Realization of Efficiency and Additivity Axioms in Markov Games
+
+In this section, we will discuss how the Efficiency and Additivity axioms are realized in Markov
+                                      v (Ñ )
+games [20]. For brevity, we rewrite vCsi ,s (Ñ ) as V (Ci , s) and vs (Ñ ) as V (Ñ , s), respectively, and
+                                                                                              z
+V (C1 , s) = V (C2 , s) = · · · = V (Cm , s) = V (Ñ , s), according to the definition of vC,s    = z.
+In the context of Markov games, a subgame evaluating a group of agents Ñ , vst (Ñ ) ∈ G(s), as a
+                                      PT −t−1
+state value, can be defined by Eπ [ τ =0 γ τ Rt+τ | st ], following the convention of reinforcement
+learning [10][Chap. 3], where π = ×i∈Ñ πi is a joint stationary policy of agents belonging to Ñ
+and T is an episode length. By the Bellman equation with n-step returns, we have the follow-up
+expansion for V (Ñ , st ):
+                                          "k−1                             #
+                                                                                     |
+                                           X
+                                                τ        k
+                        V (Ñ , st ) = Eπ      γ Rt+τ + γ V (Ñ , st+k ) st .                   (4)
+                                            τ =0
+Since V (C1 , s) = V (C2 , s) = · · · = V (Cm , s) = V (Ñ , s), we have the following formula:
+                                         "k−1                                  #
+                                                                                     |
+                                           X
+                                                τ            k
+                      V (Ci , st ) = Eπ       γ Rt+τ + γ V (Ñ , st+k ) st .                                  (5)
+                                            τ =0
+Next, we will discuss how the value of k is uniquely determined for each V (Ci , st ) under a reasonable
+assumption. For conciseness, we denote the n-step return as Gt:t+n such that
+                                        n−1
+                                         X
+                             Gt:t+n =        γ τ Rt+τ + γ n V (Ñ , st+n ).
+                                           τ =0
+Assumption 4.2. For a state st ∈ S, the basis games ordered in an ascending sequence of
+                         v   (Ñ )     v   (Ñ )             v   (Ñ )
+the coalition sizes, (vCs1t,st (Ñ ), vCs2t,st (Ñ ), ..., vCsmt ,st (Ñ )), are associated with a sequence
+of n-step returns, (Eπ [Gt:t+1 |st ], Eπ [Gt:t+2 |st ], ..., Eπ [Gt:t+n |st ]), such that Eπ [Gt:t+k |st ] =
+Pq      vst (Ñ )
+   i=p vCi ,st (Ñ ), for 1 ≤ k ≤ n, where |Cp−1 | < |Cp | = |Cp+1 | = · · · = |Cq | < |Cq+1 |
+and n < m.
+By Assumption 4.2 (see Appendix B for more justification), we can obtain the formula such that
+ v    (Ñ )       1                                                              v   (Ñ )
+vCsit,st (Ñ ) = q(i) · Eπ [Gt:t+n(i) |st ] due to identical values across vCsit,st (Ñ ), where q(i) denotes
+the total number of coalitions that have the same size as Ci , and n(i) denotes the index of the
+corresponding n-step return Gt:t+n(i) , with respect to coalition Ci . Note that coalitions with the
+identical sizes are assigned the same n(i). By substitution, we rewrite Eq (5) as follows:
+                                                                                           
+                                              n(i)−1
+                                 1
+                                                                                             |
+                                               X
+                 V (Ci , st ) =      · Eπ           γ τ Rt+τ + γ n(i) V (Ñ , st+n(i) ) st  .           (6)
+                                q(i)           τ =0
+
+
+We now impose a multidimensional linear operator denoted by ϕ : G(s) → R|Ñ | on V (Ci , st ). By
+linearity, it follows that:
+                                                                                             
+                                         n(i)−1
+                               1
+                                                                                                 |
+                                          X
+            ϕ(V (Ci , st )) =      · Eπ        γ τ ϕ(Rt+τ ) + γ n(i) ϕ(V (Ñ , st+n(i) )) st  . (7)
+                              q(i)        τ =0
+
+
+
+                                                        5
+4.1.1    Efficiency Axiom
+                                           P|Ñ |
+Proposition 4.3. Given the condition that i=1 ϕi (Rt ) = Rt , the payoff allocation defined on
+returns Rt , can be expressed as:
+                                     X                                         
+                    ϕi (Rt ) := Rt −    ϕj (V (Ñ , st )) − γϕj (V (Ñ , st+1 )) .          (8)
+                                              j̸=i
+
+
+Note that ϕ(Rt+τ ) in Eq. (7) has not yet been defined. For it to be well defined on the subspace G(s),
+it is required to represent ϕ(Rt+τ ) in the form of ϕ(V (Ñ , s)). To achieve this, we now define ϕ(Rt )
+                                                                                 P|Ñ |
+by introducing the Efficiency axiom. To satisfy the Efficiency axiom such that i=1 ϕi (V (Ñ , st )) =
+                                              P|Ñ |
+V (Ñ , st ), it is reasonable to assume that i=1 ϕi (Rt ) = Rt . In other words, each agent’s value
+expansion can be expressed independently with its own ϕi (Rt ), which will be detailed in the next
+subsection. Then, the resulting ϕi (Rt ) is detailed in Proposition 4.3.
+
+4.1.2    Additivity Axiom
+             v (Ñ )
+Recall that vCsi ,s (Ñ ) is denoted by V (Ci , s), and vs (Ñ ) is denoted by V (Ñ , s). Substituting Eq. (7)
+into the Additivity axiom detailed in Eq. (3) and presuming that there are m n-step returns Gt:t+n in
+total with no loss of generality, we obtain the following formula:
+                              m
+                                                   "n−1                                           #
+                                    kCn
+                                                                                                      |
+                             X                      X
+                                                          τ               n
+          ϕ(V (Ñ , st )) =                   · Eπ       γ ϕ(Rt+τ ) + γ ϕ(V (Ñ , st+n )) st .              (9)
+                             n=1
+                                 V (Ñ , st )       τ =0
+
+By linearity of the expectation operator, we obtain that:
+                              "m                 n−1
+                                                                                        #
+                               X kC
+                                                                                                      |
+                                                 X
+                                         n            τ            n
+         ϕ(V (Ñ , st )) = Eπ                  ·     γ ϕ(Rt+τ ) + γ ϕ(V (Ñ , st+n )) st ,                (10)
+                               n=1
+                                   V (Ñ , st ) τ =0
+                                                                                       Cn         k
+where the term in the Eπ [·] can be seen as a form of truncated λ-return [10], with V (Ñ ,s)
+                                                                                              as a weight,
+generated by a distribution parameterized by λ. We will specify this in the next section.
+
+4.2     Implementation of Additivity, Efficiency and Symmetry in N-Agent Ad Hoc Teamwork
+
+In this section, we will discuss how the conditions derived above can be implemented in NAHT, to
+fulfill the axiomatic characterization: Additivity, Efficiency and Symmetry. From the perspective of
+various composition of the axiomatic characterization, we propose a new algorithm named Shapley
+Machine, and interpret the existing algorithm, POAM [6], in Section 4.3.
+
+4.2.1    Additivity Axiom
+First, we will learn ϕi (V (Ñ , st )) directly for each controlled agent i ∈ C̃. For brevity, we can
+represent each ϕi (V (Ñ , st )) as Vi (st ), and ϕi (Rt ) as Rt,i , respectively. By sampling trajectories
+under a joint policy π, we derive the following TD error δt,i for each agent i such that
+                                m                n−1
+                                X     kCn        X
+                       δt,i =                  ·      (γ τ Rt+τ,i + γ n Vi (st+n )) − Vi (st ).           (11)
+                                n=1
+                                    V (Ñ , s)   τ =0
+                                                                                       1
+Proposition 4.4. For the class of superadditive games formed by a set of basis games {vC,s |∅ ̸=
+C ⊆ Ñ }, it holds that kC ≥ 0, for all ∅ ̸= C ⊆ Ñ .
+                        ′        Cn       k
+For brevity, we denote kC n
+                            = V (Ñ ,s)
+                                        . Since in definition V (Ñ , s) > 0, we can conclude that
+  ′
+kC  n
+      > 0 is a sufficient condition for V (Ñ , s) belonging to the superadditive game class, according
+                                           ′
+to Proposition 4.4. In other words, kC       n
+                                                > 0 facilitates cooperation within a group of agents,
+following the relationship between superadditive games and cooperative MARL described in [11]
+(see Appendix A.2 for details).
+
+
+                                                           6
+                                                                     ′      ′              ′
+Following the convention of TD(λ) in RL [10], the values of (kC        1
+                                                                         , kC 2
+                                                                                , · · · , kC m
+                                                                                               ) are generated
+                                                                                       ′
+using a geometric distribution Pλ with the parameter 0 < λ < 1, such that kCi = Pλ (i), resulting
+((1 − λ), (1 − λ)λ, · · · , (1 − λ)λm−1 , λm ). With this condition, Eq. (11) becomes the TD error of
+the well-known truncated TD(λ) prediction, shortened as TTD(λ) [21].
+
+4.2.2    Efficiency Axiom
+By substitution into Eq. (8), the Rt+τ,i in Eq. (11) can be expressed as
+                                            X
+                               Rt,i = Rt −       (Vj (st ) − γVj (st+1 )) .                              (12)
+                                                  j̸=i
+
+Theorem 4.5 ([18]). Given an additively factored immediate reward function, for any timestep t
+there is a factorization scheme of the Dynamic Bayesian Network (describing the transition function),
+such that the value of a finite-horizon factored Dec-POMDP is decomposable across agents.
+        P|Ñ |
+Rt =       i=1 ϕi (Rt ) to derive the Efficiency axiom is also referred to as additively factored im-
+mediate reward function. Theorem 4.5 indicates that the Efficiency axiom such that V (Ñ , st ) =
+P|Ñ |
+   i=1 ϕi (V (Ñ , st )) always exists in the context of Dec-POMDP [22], given a factorization scheme
+of the transition function. However, we may optionally add one additional condition to implicitly
+facilitate searching for a factorization scheme during training such that
+                                     |Ñ |
+                                     X
+                                             ϕi (V (Ñ , st )) = V (Ñ , st ).                           (13)
+                                      i=1
+
+4.2.3    Symmetry Axiom
+In practice, an agent is only able to receive an observation, in theory generated from a function of the
+state in Dec-POMDPs, a partially observable Markov game. This leads to that an agent is required to
+infer the state, as an individual hidden state, by the history of observations, e.g., using recurrent neural
+networks (RNNs), e.g. GRUs [23]. Owing to the feature of NAHT, each agent has to infer other
+agents’ characteristics, which are used as inputs in addition to the individual hidden state, for both
+individual value functions and policies. This has been accomplished by the previous work, POAM [6],
+a variant of IPPO [7] with an encoder-decoder module to infer other agents’ characteristics, as a joint
+embedding vector. The value functions (critics) with the concatenation of individual hidden state and
+the joint embedding. Recall that the Symmetry axiom states that two agents who contribute equally
+to all coalitions excluding themselves should receive equal payoff allocations [24][Chap. 2]. In the
+context of NAHT, this axiom applies when agents i and j share identical agent types. Since their
+types are the same, the two agents are exchangeable—from the perspective of any third agent, i and j
+are indistinguishable when included as teammates. Similarly, from each agent’s own perspective, the
+other agent appears identical within the teammate set. As a result, when interacting with the same
+teammates, agents i and j will exhibit identical behavioral trajectories, leading to identical inferred
+individual hidden states. Furthermore, since the joint embedding vector of teammates is computed
+based on their behavioral trajectories, and the teammates are fixed while i and j behave identically,
+both agents will infer the same joint teammate representation. Consequently, their expected payoff
+allocations, Vi and Vj , are equal, thereby satisfying the Symmetry axiom.
+
+4.3     Discussion on Proposed Algorithms and POAM
+
+To summarize, POAM uses TD(λ) as the target values to update critics, and the global reward Rt for
+each agent’s policy optimization. Our algorithm named Shapley Machine is implemented based on
+POAM, by simply replacing the global reward Rt with each agent’s Rt,i defined in Eq. (12), using
+TTD(λ) with the horizon proportional to the number of possible agents, and adding Eq. (13) as a
+regularization term.
+Proposition 4.6. Shapley Machine is an algorithm that fulfills Efficiency, Additivity and Symmetry,
+so it learns Vi as Shapley values for dynamic scenarios.
+Note that Shapley Machine is forced to comply with Efficiency, Additivity and Symmetry during
+learning, so the resulting Vi has to be Shapley value, as highlighted in Proposition 4.6.
+
+
+                                                          7
+   Remark 4.7. Banzhaf Machine is an algorithm which generates Vi , fulfilling Additivity and Symmetry.
+
+   Following the principle of designing algorithms by complying with axiomatic characterization, we
+   also propose an algorithm that satisfies conditions corresponding to Additivity and Symmetry. As the
+   resulting Vi is likely to be Banzhaf index [25], 2 the algorithm is referred to as Banzhaf Machine.
+   Remark 4.8. POAM is a Banzhaf Machine that learns Banzhaf indices for dynamic scenarios.
+
+   According to the taxonomy of our theory, POAM also satisfies Additivity and Symmetry, so it
+   is a Banzhaf Machine. However, it uses TD(λ) rather than TTD(λ), which means that it may
+   overparameterize the value function in some situations where there are few agents (justified by the
+   MPE case in Figure 5a).
+
+
+   5                         Experiments
+
+   In experiments, we evaluate our proposed algorithm on MPE and SMAC tasks designed by [6],
+   compared with the only baseline algorithm POAM for NAHT. Also, we demonstrate the importance
+   of basis games, a core concept in our theory, as an aid to setting the number of components considered
+   in TTD(λ). All experimental results are run with 5 random seeds and demonstrated in means with
+   95% confidence intervals. The details of baselines, the implementation of our algorithm and further
+   experimental settings are given in Appendix D.
+
+                                           mpe-pp                                                                    5v6                                                3sv5z                                        8v9                                       10v11
+                                                                                          0.6
+                                                                                                                                                  0.5                                             0.8
+                    15                                                                    0.5                                                                                                                                                0.8
+
+
+
+
+Mean Test Return                                                          Mean Win Rate
+                                                                                                                                                  0.4                                             0.6
+                    10                                                                    0.4                                                                                                                                                0.6
+                                                                                          0.3                                                     0.3
+                     5                                                                                                                                                                            0.4                                        0.4
+                                                                                          0.2                                                     0.2
+                     0                                                                                                                                                                            0.2                                        0.2
+                                                                                          0.1                                                     0.1                                                                                                         POAM
+                     5                                                                                                                                                                                                                                        Shapley Machine
+                                                                                          0.0                                                     0.0                                             0.0                                        0.0
+                     0.0         0.5         1.0        1.5          2.0                     0.0         0.5         1.0     1.5       2.0           0.0        0.5      1.0      1.5      2.0       0.0    0.5       1.0      1.5    2.0       0.0     0.5      1.0      1.5    2.0
+                                       Timesteps                    1e7                                        Timesteps             1e7                              Timesteps          1e7                      Timesteps          1e7                      Timesteps         1e7
+
+
+
+                                                                                 Figure 2: Testing evaluation during the training procedure.
+
+
+                                            mpe-pp                                                                    5v6                                                3sv5z                                       8v9                                       10v11
+                    12.5                                                                      0.5
+                                                                                                                                                                                                  0.7                                         0.8
+                    10.0                                                                                                                              0.4
+
+
+
+
+Mean Train Return
+                                                                                              0.4                                                                                                 0.6
+
+
+
+                                                                              Mean Win Rate
+                     7.5                                                                                                                              0.3                                         0.5                                         0.6
+                                                                                              0.3
+                     5.0                                                                                                                                                                          0.4
+                                                                                                                                                      0.2                                                                                     0.4
+                     2.5                                                                      0.2                                                                                                 0.3
+                     0.0                                                                                                                                                                          0.2                                         0.2
+                                                                                              0.1                                                     0.1
+                                                                                                                                                                                                  0.1                                                         POAM
+                     2.5
+                                                                                              0.0                                                     0.0                                         0.0                                         0.0
+                                                                                                                                                                                                                                                              Shapley Machine
+                         0.0         0.5         1.0         1.5         2.0                     0.0         0.5      1.0      1.5         2.0           0.0     0.5        1.0    1.5     2.0       0.0     0.5      1.0      1.5     2.0       0.0    0.5      1.0      1.5    2.0
+                                           Timesteps                 1e7                                           Timesteps           1e7                             Timesteps          1e7                      Timesteps         1e7                      Timesteps         1e7
+
+
+
+                                                                             Figure 3: Training evaluation during the training procedure.
+
+
+                                       mpe-pp                                                                      5v6                           30
+                                                                                                                                                                       3sv5z                                        8v9                                        10v11
+                                                                        17.5                                                                                                                                                                                  POAM
+       40                                                                                                                                        25                                              20                                          25               Shapley Machine
+                                                                        15.0
+       30                                                               12.5                                                                     20                                                                                          20
+                                                                                                                                                                                                 15
+                                                                        10.0                                                                     15                                                                                          15
+       20                                                                7.5                                                                                                                     10
+                                                                                                                                                 10                                                                                          10
+                                                                         5.0
+       10                                                                                                                                         5                                               5
+                                                                         2.5                                                                                                                                                                  5
+                                                                         0.0                                                                      0
+              0.0              0.5         1.0         1.5          2.0     0.0                        0.5          1.0     1.5       2.0          0.0         0.5      1.0       1.5     2.0     0.0      0.5       1.0     1.5      2.0     0.0      0.5      1.0       1.5    2.0
+                                     Timesteps                     1e7                                       Timesteps               1e7                             Timesteps           1e7                     Timesteps           1e7                     Timesteps          1e7
+
+
+
+                                                 Figure 4: Critic loss record across all scenarios during the training procedure.
+
+
+                         2
+      It is known that Banzhaf index is not the only payoff allocation scheme that satisfies Additivity and
+   Symmetry.
+
+
+                                                                                                                                                                        8
+   5.1                       Main Results
+
+  We first show the general performance of Shapley Machine, compared with POAM. It can be observed
+  in Figure 2 that in three scenarios (MPE, 3sv5z and 5v6), Shapley Machine outperforms POAM in
+  testing. In contrast, Shapley Machine can only match the performance of POAM in both 8v9 and
+  10v11 during testing. On the other hand, Figure 3 shows that Shapley Machine converges faster
+  during training. A possible reason is that the structure imposed by cooperative games facilitates the
+  predicting of each agent’s payoff. This can also be verified by Figure 4, in which we observe that
+  the critic loss of Shapley Machine is consistently lower than POAM. Similar phenomenon can be
+  observed for the entropy of policies (see Appendix E.3). This implies that agents trained with Shapley
+  Machine receive more accurate credit during learning, which justifies the correctness of our theory
+  and the effectiveness of Shapley Machine.
+                                      mpe-pp                                                  5v6                                                         mpe-pp                                                  5v6
+                                                                             0.6
+                   15                                                                                                                       15                                                   0.5
+                                                                             0.5
+
+
+
+
+Mean Test Return                                             Mean Win Rate                                               Mean Test Return                                        Mean Win Rate
+                   10                                                        0.4                                                            10                                                   0.4
+
+                                                                             0.3                                                                                                                 0.3
+                    5                                                                                                                        5
+                                                                             0.2                                                                                                                 0.2
+                    0                                                                                                                        0
+                                               m=7                           0.1                        m=20                                             POAM                                    0.1            POAM
+                    5                          m=100                                                    m=31                                 5           Banzhaf Machine                                        Banzhaf Machine
+                                                                             0.0                                                                                                                 0.0
+                    0.0        0.5      1.0      1.5    2.0                     0.0   0.5      1.0      1.5    2.0                           0.0   0.5      1.0      1.5    2.0                     0.0   0.5      1.0      1.5    2.0
+                                     Timesteps         1e7                                  Timesteps         1e7                                        Timesteps         1e7                                  Timesteps         1e7
+
+
+                   (a) Shapley Machine with various m values.                                                                                      (b) POAM vs. Banzhaf Machine.
+   Figure 5: Proof-of-concept experiments for verifying the necessity of basis games. In MPE, the
+   expected number of basis games m is 7, while it is 31 in 5v6. Without the structure of our theory,
+   there is no evidence to decide the value of m. Instead, TD(λ) can only be used to calculate n-step
+   returns up to the episode length. The episode length of MPE is 100.
+
+   5.2                       Proof of Concepts in Our Theory
+
+  Horizon m of TTD(λ) Equal to the Number of Basis Games. We now investigate whether the
+  horizon of TTD(λ), denoted by m, is associated with the number of basis games according to our
+  theory. In Figure 5a, we can observe that the performance of Shapley Machine varies among various
+  m. Recall that in MPE the total number of agents is 3, so in our theory the optimal value of m is 7, 3
+  which is consistent with the result. To eliminate the possibility that this result is correlated with the
+  Efficiency axiom of Shapley Machine, we also conduct an experiment on comparing POAM 4 and its
+  variant with the optimal m as 7, referred to as Banzhaf Machine, in Figure 5b. It can be observed
+  that the optimal m is still the number of basis games, conforming to our theory. This result reveals a
+  general empirical finding that TTD(λ) tends to perform better than TD(λ) in NAHT, with the
+  horizon estimated by the number of agents.
+  Approximating m for Large-Scale Scenarios. In scenarios with a large number of agents, it is
+  almost impossible to consider all basis games (the number of which could be much larger than the
+  episode length). To explore if the number of a subset of basis games can work for these scenarios,
+  we further conduct case studies on 5v6. As shown in Figure 5a, using m = 20 to approximate the
+  theoretical number of basis games given by m = 31 will not reduce the performance. In additional
+  experiments (see Appendix E.5), we observe that the empirical optimal value of m is still positively
+  correlated to the number of agents, this providing a law to seek m manually for the large-scale
+  scenarios, such as 8v9 and 10v11. Nevertheless, establishing an empirical function that maps the
+  number of agents to m will be addressed in future work. In this paper, we temporarily use the
+  episode lengths as empirical values for m in the 8v9 and 10v11 scenarios, which coincidentally
+  correspond to the ascending order of their coalition sizes. This observation naturally raises an open
+  question: Is the episode length of a task related to the maximum number of agents involved?
+  Furthermore, it is empirically acknowledged that episode length often correlates with task difficulty
+  and can facilitate more effective exploration. From this perspective, a second question arises: Is
+  the maximum number of agents indicative of task difficulty? Both questions warrant deeper
+  investigation in future work.
+                        3
+                            Recall that the number of basis games is equal to the number of non-empty coalitions of an agent set.
+                        4
+                            POAM uses TD(λ), equivalently, m is equal to the episode length.
+
+
+                                                                                                                     9
+6     Related Work
+6.1   TD(λ) in Reinforcement Learning and Multi-Agent Reinforcement Learning
+
+Related work on temporal-difference learning with eligibility traces centers on the seminal TD(λ)
+algorithm proposed by [10], which unified one-step TD and Monte Carlo methods via a trace-decay
+parameter λ and introduced the forward- and backward-view equivalence for efficient multi-step
+credit assignment. Subsequent theoretical analyses [26, 27, 28] established convergence guarantees
+and characterized the bias–variance trade-off inherent in λ-returns, while extensions by [29, 30]
+adapted eligibility traces for off-policy control, Q(λ). Advances in function approximation, including
+true online TD(λ) [31] and gradient-TD methods, further broadened applicability to large-scale and
+nonlinear settings, inspiring n-step return techniques such as generalized advantage estimation (GAE)
+[32] for policy optimization. In multi-agent reinforcement learning, algorithms of PPO family such
+as MAPPO [33] and IPPO [7], applied GAE to optimize policies and thus used TD(λ) as the target
+values to train critics. This paper sheds light on the link between truncated TD(λ), shortened as
+TTD(λ) in NAHT (a generalization of MARL) and Shapley value in theory. Furthermore, it offers
+the insight that the number of n-step return components in TTD(λ) should be larger as the number of
+agents increases. This theoretically insightful conclusion has the potential to be applied to a broader
+range of multi-agent reinforcement learning tasks.
+
+6.2   Theoretical Models for Ad Hoc Teamwork
+
+We now discuss theoretical models describing ad hoc teamwork (AHT). [34] pioneered research
+into AHT by investigating repeated matrix games involving a single teammate. Subsequent studies
+expanded this framework to scenarios with multiple teammates, notably by [35]. Later, [36] further
+relaxed earlier assumptions by allowing teammates’ policies to be selected from a known set. Stone
+et al. [37] initially formalized AHT through collaborative multi-armed bandits, albeit under notable
+assumptions such as prior knowledge of teammates’ policies and environmental conditions. [38]
+advanced this field significantly by introducing the stochastic Bayesian game (SBG), the first com-
+prehensive theoretical framework accommodating dynamic environments and unknown teammate
+behaviors in AHT. Building on SBG, [39] proposed the open stochastic Bayesian game (OSBG),
+addressing open ad hoc teamwork (OAHT). [40] modeled AHT through interactive Bayesian rein-
+forcement learning (IBRL) within Markov games, specifically targeting non-stationary teammate
+policies within single episodes. [41] introduced the hidden parameter Markov decision process
+(HiP-MDP) to handle situations where teammates’ policies vary across episodes but remain station-
+ary during individual episodes. Most recently, [42] extended OSBG by incorporating principles
+from cooperative game theory, introducing the open stochastic Bayesian coalitional affinity game
+(OSBG-CAG), which theoretically justifies a graph-based representation for joint Q-value functions
+and includes rigorous convergence proofs for Q-learning algorithms in open team scenarios. This
+paper stands on the view of cooperative game theory, establishing a state-space cooperative game
+model to deal with the varying number of controlled agents and uncontrolled agents. Furthermore,
+this model serves as the foundation for the Shapley value-based approach to NAHT.
+
+6.3   Shapley Value in Multi-Agent Reinforcement Learning
+
+Related work mainly focused on developing the theory of Shapley value in MARL, and incorporated
+Shapley value [43] into MARL algorithms. Early studies [11] incorporated Shapley value into credit
+assignment scheme in a principled way and proposed an algorithm named SQDDPG, underpinned by
+the equivalence between cooperative-game theoretical models in dynamic scenarios and the shared
+reward Markov games. [14] further improved the theory by proving the existence of Shapley value,
+and proposed an algorithm named SHAQ, an algorithm with promising convergence to find an
+optimal joint policy. It also shed light on the relationship between Shapley value and the relevant
+value decomposition and credit assignment approaches for MARL. [12] improved the stability of
+SQDDPG and proposed an algorithm named Shapley Counterfactual Credits. [44] incorporated
+Shapley value into the model-based PPO as each agent’s advantage value, and estimated coalition
+values by trained transition and reward models. [45] continued the idea from [44], by replacing the
+the transition and reward models with more powerful world models. [46] incorporated Shapley value
+into multi-agent communication, as a criterion for forming communication between agents. This
+paper primarily focuses on learning the Shapley value to address NAHT, a generalized paradigm of
+
+
+                                                  10
+MARL characterized by an uncertain number of controlled and uncontrolled agents. Furthermore,
+the Shapley value is learned by satisfying its axioms, rather than by constructing an explicit form as
+done in previous work. This may help overcome the notorious instability issues in learning Shapley
+value-based algorithms.
+
+7   Conclusion
+Summary. This paper addresses NAHT through the lens of cooperative game theory. Specifically, it
+first establishes a state-space cooperative game model, in the form of a vector space that describes
+NAHT processes, extended from the cooperative game space from cooperative game theory. Relying
+on the axioms defined on the state-space cooperative game model (Additivity, Efficiency and Sym-
+metry), we derive an algorithm named Shapley Machine that is provable to uniquely learn Shapley
+value. Our approach is different from the traditional usage of Shapley value in MARL, in which value
+functions are usually constructed by Shapley value’s explicit form. Rather, we show that Shapley
+values are subtly related to the TD(λ), a well-known algorithm in RL dealing with bias-variance
+tradeoff in TD prediction.
+Discussion, Limitation and Future Work. In addition to proposing a new algorithm, a key
+result of this work is to shed light on designing multi-agent learning algorithms through axiomatic
+characterization. This not only helps to categorize existing algorithms (e.g., POAM can be categorized
+as an algorithm using Banzhaf index as a credit assignment scheme), but aids in designing new
+algorithms on the basis of clearly interpretable formal principles (e.g., Shapley Machine is designed
+by fulfilling three axioms). This will decrease the possibility of reinvention of algorithms by
+clarifying the relationship between the newly designed algorithm and previous ones. This principle
+can be extended to the future NAHT and MARL algorithm design, accelerating the pace of research
+into trustworthy AI. On the other hand, this paper unveils the potential to investigate the TTD(λ)
+technique, though the hyperparameters like λ and horizon m can only be manually tuned. This is
+one of limitations of this work. In future work, the relation between λ and task categories, as well as
+the relation between m and the number of agents, can be further investigated. One possible solution
+is adaptively learning these hyperparameters through real-time feedback during training. Moreover,
+                                                  ′
+in our theory the weightings in TTD(λ) (i.e. kC     in the context of our theory) can be negative (see
+Figure 1), which implies that the class of games is broader than superadditive games from the
+perspective of cooperative game theory. This opens a new route towards designing weightings in a
+richer function class, rather than merely assuming a geometric distribution following the convention
+of RL. Finally, it has been shown in experiments that Shapley Machine does not work well for large-
+scale environments, which we will explore in the future work, especially establishing an empirical
+function that maps the number of agents to m.
+
+Acknowledgement
+This project is supported by the Engineering and Physical Sciences Research Council [Grant Ref:
+EP/Y028732/1]. The computational resources are supported by CSC – IT Center for Science LTD.,
+Finland.
+
+References
+ [1] Jianhong Wang, Wangkun Xu, Yunjie Gu, Wenbin Song, and Tim C Green. Multi-agent
+     reinforcement learning for active voltage control on power distribution networks. Advances in
+     Neural Information Processing Systems, 34:3271–3284, 2021.
+ [2] Yuan Zhang, Umashankar Deekshith, Jianhong Wang, and Joschka Boedecker. Improving the
+     efficiency and efficacy of multi-agent reinforcement learning on complex railway networks with
+     a local-critic approach. In Proceedings of the International Conference on Automated Planning
+     and Scheduling, volume 34, pages 698–706, 2024.
+ [3] Siddharth Nayak, Kenneth Choi, Wenqi Ding, Sydney Dolan, Karthik Gopalakrishnan, and
+     Hamsa Balakrishnan. Scalable multi-agent reinforcement learning through intelligent infor-
+     mation aggregation. In International Conference on Machine Learning, pages 25817–25833.
+     PMLR, 2023.
+
+
+                                                 11
+ [4] Yang Li, Dengyu Zhang, Junfan Chen, Ying Wen, Qingrui Zhang, Shaoshuai Mou, and Wei Pan.
+     Hola-drone: Hypergraphic open-ended learning for zero-shot multi-drone cooperative pursuit,
+     2024.
+ [5] Richard S Sutton, Andrew G Barto, et al. Reinforcement learning: An introduction, volume 1.
+     MIT press Cambridge, 1998.
+ [6] Caroline Wang, Muhammad Arrasy Rahman, Ishan Durugkar, Elad Liebman, and Peter Stone.
+     N-agent ad hoc teamwork. Advances in Neural Information Processing Systems, 37:111832–
+     111862, 2025.
+ [7] Christian Schroeder De Witt, Tarun Gupta, Denys Makoviichuk, Viktor Makoviychuk, Philip HS
+     Torr, Mingfei Sun, and Shimon Whiteson. Is independent learning all you need in the starcraft
+     multi-agent challenge? arXiv preprint arXiv:2011.09533, 2020.
+ [8] Lewis Hammond, Alan Chan, Jesse Clifton, Jason Hoelscher-Obermaier, Akbir Khan, Euan
+     McLean, Chandler Smith, Wolfram Barfuss, Jakob Foerster, Tomáš Gavenčiak, et al. Multi-
+     agent risks from advanced ai. arXiv preprint arXiv:2502.14143, 2025.
+ [9] Liviu Panait and Sean Luke. Cooperative multi-agent learning: The state of the art. Autonomous
+     agents and multi-agent systems, 11:387–434, 2005.
+[10] Richard S Sutton. Learning to predict by the methods of temporal differences. Machine learning,
+     3:9–44, 1988.
+[11] Jianhong Wang, Yuan Zhang, Tae-Kyun Kim, and Yunjie Gu. Shapley q-value: A local reward
+     approach to solve global reward games. In Proceedings of the AAAI conference on artificial
+     intelligence, volume 34, pages 7285–7292, 2020.
+[12] Jiahui Li, Kun Kuang, Baoxiang Wang, Furui Liu, Long Chen, Fei Wu, and Jun Xiao. Shapley
+     counterfactual credits for multi-agent reinforcement learning. In Proceedings of the 27th ACM
+     SIGKDD Conference on Knowledge Discovery & Data Mining, pages 934–942, 2021.
+[13] Dongge Han, Chris Xiaoxuan Lu, Tomasz Michalak, and Michael Wooldridge. Multiagent
+     model-based credit assignment for continuous control. In Proceedings of the 21st International
+     Conference on Autonomous Agents and Multiagent Systems, pages 571–579, 2022.
+[14] Jianhong Wang, Yuan Zhang, Yunjie Gu, and Tae-Kyun Kim. Shaq: Incorporating shapley
+     value theory into multi-agent q-learning. Advances in Neural Information Processing Systems,
+     35:5941–5954, 2022.
+[15] Yang Li, Shao Zhang, Jichen Sun, Yali Du, Ying Wen, Xinbing Wang, and Wei Pan. Cooperative
+     open-ended learning framework for zero-shot coordination. In Andreas Krause, Emma Brunskill,
+     Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett, editors, Proceedings
+     of the 40th International Conference on Machine Learning, volume 202 of Proceedings of
+     Machine Learning Research, pages 20470–20484. PMLR, 23–29 Jul 2023.
+[16] Pradeep Dubey. On the uniqueness of the shapley value. International Journal of Game Theory,
+     4(3):131–139, 1975.
+[17] Michael M Bronstein, Joan Bruna, Taco Cohen, and Petar Veličković. Geometric deep learning:
+     Grids, groups, graphs, geodesics, and gauges. arXiv preprint arXiv:2104.13478, 2021.
+[18] Frans A Oliehoek, Christopher Amato, et al. A concise introduction to decentralized POMDPs,
+     volume 1. Springer, 2016.
+[19] H Peyton Young. Monotonic solutions of cooperative games. International Journal of Game
+     Theory, 14(2):65–72, 1985.
+[20] Michael L Littman. Markov games as a framework for multi-agent reinforcement learning. In
+     Machine learning proceedings 1994, pages 157–163. Elsevier, 1994.
+[21] Pawel Cichosz. Truncating temporal differences: On the efficient implementation of td (lambda)
+     for reinforcement learning. Journal of Artificial Intelligence Research, 2:287–318, 1994.
+
+
+                                                12
+[22] Daniel S Bernstein, Robert Givan, Neil Immerman, and Shlomo Zilberstein. The complexity
+     of decentralized control of markov decision processes. Mathematics of operations research,
+     27(4):819–840, 2002.
+[23] Junyoung Chung, Caglar Gulcehre, KyungHyun Cho, and Yoshua Bengio. Empirical evaluation
+     of gated recurrent neural networks on sequence modeling. arXiv preprint arXiv:1412.3555,
+     2014.
+[24] Georgios Chalkiadakis, Edith Elkind, and Michael Wooldridge. Computational aspects of
+     cooperative game theory. Morgan & Claypool Publishers, 2011.
+[25] John F Banzhaf III. Weighted voting doesn’t work: A mathematical analysis. Rutgers L. Rev.,
+     19:317, 1964.
+[26] Peter Dayan. The convergence of td (λ) for general λ. Machine learning, 8:341–362, 1992.
+[27] Peter Dayan and Terrence J Sejnowski. Td (λ) converges with probability 1. Machine Learning,
+     14:295–301, 1994.
+[28] John Tsitsiklis and Benjamin Van Roy. Analysis of temporal-diffference learning with function
+     approximation. Advances in neural information processing systems, 9, 1996.
+[29] Christopher John Cornish Hellaby Watkins et al. Learning from delayed rewards. 1989.
+[30] Jing Peng and Ronald J Williams. Incremental multi-step q-learning. In Machine Learning
+     Proceedings 1994, pages 226–232. Elsevier, 1994.
+[31] Harm Seijen and Rich Sutton. True online td (lambda). In International Conference on Machine
+     Learning, pages 692–700. PMLR, 2014.
+[32] John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel. High-
+     dimensional continuous control using generalized advantage estimation. arXiv preprint
+     arXiv:1506.02438, 2015.
+[33] Chao Yu, Akash Velu, Eugene Vinitsky, Jiaxuan Gao, Yu Wang, Alexandre Bayen, and Yi Wu.
+     The surprising effectiveness of ppo in cooperative multi-agent games. Advances in neural
+     information processing systems, 35:24611–24624, 2022.
+[34] Ronen I Brafman and Moshe Tennenholtz. On partially controlled multi-agent systems. Journal
+     of Artificial Intelligence Research, 4:477–507, 1996.
+[35] Noa Agmon and Peter Stone. Leading ad hoc agents in joint action settings with multiple
+     teammates. In AAMAS, pages 341–348, 2012.
+[36] Noa Agmon, Samuel Barrett, and Peter Stone. Modeling uncertainty in leading ad hoc teams.
+     In Proceedings of the 2014 international conference on Autonomous agents and multi-agent
+     systems, pages 397–404, 2014.
+[37] Peter Stone and Sarit Kraus. To teach or not to teach? decision making under uncertainty in
+     ad hoc teams. In Proceedings of the 9th International Conference on Autonomous Agents and
+     Multiagent Systems: volume 1-Volume 1, pages 117–124, 2010.
+[38] Stefano V Albrecht and Subramanian Ramamoorthy. A game-theoretic model and best-response
+     learning method for ad hoc coordination in multiagent systems. In Proceedings of the 2013
+     international conference on Autonomous agents and multi-agent systems, pages 1155–1156,
+     2013.
+[39] Muhammad A Rahman, Niklas Hopner, Filippos Christianos, and Stefano V Albrecht. Towards
+     open ad hoc teamwork using graph-based policy learning. In International Conference on
+     Machine Learning, pages 8776–8786. PMLR, 2021.
+[40] Luisa M. Zintgraf, Sam Devlin, Kamil Ciosek, Shimon Whiteson, and Katja Hofmann. Deep
+     interactive bayesian reinforcement learning via meta-learning. In Frank Dignum, Alessio
+     Lomuscio, Ulle Endriss, and Ann Nowé, editors, AAMAS ’21: 20th International Conference
+     on Autonomous Agents and Multiagent Systems, Virtual Event, United Kingdom, May 3-7, 2021,
+     pages 1712–1714. ACM, 2021.
+
+
+                                               13
+[41] Annie Xie, Dylan Losey, Ryan Tolsma, Chelsea Finn, and Dorsa Sadigh. Learning latent
+     representations to influence multi-agent interaction. In Conference on robot learning, pages
+     575–588. PMLR, 2021.
+
+[42] Jianhong Wang, Yang Li, Yuan Zhang, Wei Pan, and Samuel Kaski. Open ad hoc teamwork
+     with cooperative game theory. In International Conference on Machine Learning, pages
+     50902–50930. PMLR, 2024.
+
+[43] LS SHAPLEY. A value for n-person games. Annals of Mathematics Studies, 28:307–318, 1953.
+
+[44] Dongge Han, Chris Xiaoxuan Lu, Tomasz Michalak, and Michael Wooldridge. Multiagent
+     model-based credit assignment for continuous control. arXiv preprint arXiv:2112.13937, 2021.
+
+[45] Jiajun Chai, Yuqian Fu, Dongbin Zhao, and Yuanheng Zhu. Aligning credit for multi-agent co-
+     operation via model-based counterfactual imagination. In Proceedings of the 23rd International
+     Conference on Autonomous Agents and Multiagent Systems, pages 281–289, 2024.
+
+[46] Di Xue, Lei Yuan, Zongzhang Zhang, and Yang Yu. Efficient multi-agent communication via
+     shapley message value. In IJCAI, pages 578–584, 2022.
+
+[47] Gianluigi Greco, Enrico Malizia, Luigi Palopoli, Francesco Scarcello, et al. On the complexity
+     of the core over coalition structures. In IJCAI, volume 11, pages 216–221, 2011.
+
+
+A     Additional Background
+A.1   λ-Return and TD(λ)
+
+We now introduce an extension of return named λ-return. Mathematically, a λ-return Gλt for infinite-
+horizon cases can be expressed as follows:
+                     Gt:t+n = Rt + γRt+1 + · · · + γ n−1 Rt+n + γ n V (st+n ),
+                                                               ∞
+                                                              X                                 (14)
+                                                Gλt = (1 − λ)     λn Gt:t+n .
+                                                                     n=0
+
+Similarly, the λ-return for finite-horizon cases can be expressed as follows:
+                                             T
+                                             X −t
+                             Gλt = (1 − λ)          λn Gt:t+n + λT −t Gt:T .                    (15)
+                                             n=1
+
+Note that if λ = 1, updating according to the λ-return is a Monte Carlo algorithm. In contrast, if
+λ = 0, then the λ-return reduces to Gt:t+1 , the one-step return. Monte Carlo algorithm is known as
+its high variance but low bias, while one-step return is known as its low variance but high bias. For
+this reason, the change of λ can be seen as a tradeoff between bias and variance. The TD prediction
+using λ-return as the target value is referred to as TD(λ) [10].
+A variant of TD(λ) by shaping Gλt with a designated horizon h is referred to as truncated TD(λ),
+shortened as TTD(λ) [21]. Mathematically, Gλt with a designated horizon h can be formulated as
+follows:
+                                         h−t
+                                         X
+                           Gλt = (1 − λ)     λn Gt:t+n + λh−t Gt:h .                        (16)
+                                             n=0
+
+Note that in the convention of RL, the horizon h is defined as the time difference from the starting
+point of an episode, denoted by t = 0. In this paper, to simply the presentation of our work, we
+redefine the horizon as the time difference from each timestep t, denoted as m, such that m = h − t.
+With the new definition of horizon, we can rewrite the above formula of Gλt as follows:
+                                             m
+                                             X
+                            Gλt = (1 − λ)           λn Gt:t+n + λm Gt:t+m .                     (17)
+                                             n=1
+
+
+                                                     14
+A.2     Superadditive Game and Cooperative Multi-Agent Reinforcement Learning
+
+Superadditive game is a subclass of characteristic games that satisfies the additional condition
+v(C) + v(D) ≥ v(C ∪ D), for any two distinct coalitions C, D ⊆ N with C ∩ D = ∅. Previous work
+in MARL [11] has shown the equivalence on objective functions between state-based superadditive
+games with action space and team reward Markov games with coalition structures. 5 Intuitively,
+Shapley value is a solution to the stability of a team formation, resembling cooperation. Since NAHT
+is a generalization of MARL, this conclusion still valid here in principle. It is already proved that
+Shapley value exists in superadditive    games [43] and each game instance in superadditive games
+                                         1
+                                 P
+can be uniquely represented as kC vC       , where kC ≥ 0 [16]. In cooperative game theory, any game
+can be transformed to   a superadditive   game   if it is equipped with a superadditive cover such that
+v ∗ (C) = maxCS(C) D∈CS(C) v(D) [47]. As a result, it will not lose generality if we consider the
+                      P
+
+set of cooperative games as superadditive games in this paper.
+
+A.3     Policy Optimization with Agent Modeling (POAM)
+
+In general, POAM is an algorithm built upon IPPO [7]. The primary difference between POAM
+and IPPO is as follows: For each agent’s policy and value, in addition to its observation used in
+IPPO, POAM takes as input an embedding vector to predict other agents’ potential behaviors. More
+specifically, this embedding vector is trained by an encoder-decoder structure, wherein the encoder is
+modeled as RNNs and decoder is modeled as MLPs. For brevity, −i denotes the set of all agents
+excluding agent i. Let ht,i = {ok,i , ak−1,i }tk=1 denote agent i’s history of observations and actions
+up to timestep t and et,i ∈ Rn denote the resulting embedding vector of n dimensions. The encoder
+parameterized by θe is defined as fθenc e   : Hi → Rn . The embedding vector is decoded by two decoder
+networks: the observation decoder fθo : Rn → O−i , and the action decoder fθdec
+                                          dec
+                                                                                   a  : Rn → ∆(A−i ).
+The decider networks are respectively trained to predict the observations and actions of all other agents
+on the team at timestep t, ot,−i and at,−i , to encourage et,i to contain information about collective
+behaviors corresponding to ht,i . While the observation decoder directly predicts the observed −i’s
+observations, the action decoder predicts the parameters of a probability distribution over the −i’s
+actions π−i (at,−i ; fθdec  enc
+                        a (fθ e (ht,i ))). As we consider continuous observations and discrete actions,
+
+the loss function with using Categorical distribution to model π−i is as follows:
+ Lθe ,θo ,θa (ht,i , ot,−i , at,−i ) = ||fθdec  enc                  2                   dec enc
+                                            o (fθ e (ht,i ))−ot,−i || −log π−i (at,−i ; fθ a (fθ e (ht,i ))). (18)
+
+
+
+IPPO employed generalized advantage estimation (GAE) [32] to form the policy gradient, and the
+value function used to form GAE is trained by the following loss function:
+                                        1  θc                              2
+                          Lθc (ht,i ) =    Vi (ht,i , fθenc
+                                                         e (ht,i )) − V̂t,i    ,          (19)
+                                        2
+where V̂t,i is the finite-horizon TD(λ) return, for which the horizon is up to the episode length T .
+Each agent i’s GAE estimation is as follows:
+                                                      T
+                                                      X
+                                             At,i =         (γλ)l δt+l,i ,                                   (20)
+                                                      l=0
+                          c                                     c
+where δt,i = Rt + γViθ (ht+1,i , fθenc e (ht+1,i )) − Vi
+                                                              θ
+                                                                (ht,i , fθenc
+                                                                           e (ht,i )). Based on the GAE defined
+
+above, the policy optimization loss is defined as:
+                                                                                                    
+                               πθ (at,i |ht,i )                  πθ (at,i |ht,i )
+    Lθ (ht,i , at,i ) = min                       At,i , clip                       , 1 − ϵ, 1 + ϵ At,i .   (21)
+                              πθold (at,i |ht,i )               πθold (at,i |ht,i )
+
+B       Justification of Assumptions
+Assumption B.1. For a state st ∈ S, the basis games ordered in an ascending sequence of
+                          v   (Ñ )      v   (Ñ )             v    (Ñ )
+the coalition sizes, (vCs1t,st (Ñ ), vCs2t,st (Ñ ), ..., vCsmt ,st (Ñ )), are associated with a sequence
+    5
+   In [11], state-based convex games with action space were proved to be equivalent to team reward Markov
+games. However, setting C ∩ D = ∅ can reduce a convex game to a superadditive game.
+
+
+                                                        15
+of n-step returns, (Eπ [Gt:t+1 |st ], Eπ [Gt:t+2 |st ], ..., Eπ [Gt:t+n |st ]), such that Eπ [Gt:t+k |st ] =
+Pq      vst (Ñ )
+   i=p vCi ,st (Ñ ), for 1 ≤ k ≤ n, where |Cp−1 | < |Cp | = |Cp+1 | = · · · = |Cq | < |Cq+1 |
+and n < m.
+              s        v (Ñ )              1          1                                                       1
+Recall that vC,s                 = vs (Ñ )vC,s , and vC,s in a given state s is with identical definition as vC . We
+              s        v (Ñ )
+can express vC,s                 as follows:
+                                                                    
+                                                v (Ñ )
+                                                 s                      vs (Ñ ) if C ⊆ D,
+                                               vC,s       (D) =
+                                                                        0        otherwise.
+
+By Definition 2.1, as the coalition size |C| increases, it requires experiencing more agent compositions
+             s    v (Ñ )                        s                v (Ñ )
+to get the vC,s   (Ñ ) activated and thus kC vC,s  (Ñ ) can be evaluated. In the context of NAHT,
+it implies that as the coalition size |C| increases, the more agent interaction samples are needed
+to get an accurate estimation. This property is aligned with that using n-step returns Gt:t+n to
+estimate expected value would require more samples (higher variance) during TD prediction, as n
+increases [5]. For this reason, if considering a simple case such that |C1 | < |C2 |, we may have that
+ v   (Ñ )                                        v     (Ñ )
+vCs1t,st (Ñ ) = Eπ [Gt:t+1 |st ] and vCs2t,st (Ñ ) = Eπ [Gt:t+2 |st ].
+
+Now, we consider sorting all possible coalitions, the subsets of Ñ , according to their sizes, in a
+sequence. In this sequence, we can always have coalitions with identical size, such that |Cp−1 | <
+|Cp | = |Cp+1 | = · · · = |Cq | < |Cq+1 |, where 1 < p < q < 2|Ñ | − 1. Following the above
+                                                          s                       v (Ñ )                                  v (Ñ )
+                                                                                                                             s
+statement about the relation between n-step returns and vC,s                                (Ñ ), it is viable to sum the vC,s      (Ñ )
+                                                            v (Ñ )
+of coalitions with the same size. By modifying vCsi ,s (Ñ ) = Eπ [Gt:t+i ] above, we relate the
+                                                                   Pq  v (Ñ )
+summand to a n-step return, such that Eπ [Gt:t+k |st ] = i=p vCsit,st (Ñ ), where k < n. In this
+                     vst (Ñ )
+way, we can match vC,s   t
+                               (Ñ ) of all possible coalitions C ⊆ Ñ with a sequence of expected n-step
+returns (Eπ [Gt:t+1 |st ], Eπ [Gt:t+2 |st ], ..., Eπ [Gt:t+n |st ]).
+
+
+C     Complete Mathematical Proofs
+
+Lemma C.1. Given a fixed state s ∈ S each subgame vs ∈ G(s), it can be uniquely represented by
+                          vs (Ñ )
+vs = ∅̸=C⊆Ñ v k(CÑ ) · vC,s
+    P
+                                   .
+                             s
+
+
+
+
+Proof. We can represent each kC equivalently as kCv v(sÑ(Ñ) ) . Substituting this term into the formula in
+                                                   s
+Definition 2.1, we can get the following formula:
+                                                                X       kC vs (Ñ ) 1
+                                                 vs =                              · vC,s .
+                                                                         vs (Ñ )
+                                                             ∅̸=C⊆Ñ
+
+        s    v (Ñ )              1
+Since vC,s             = vs (Ñ )vC,s with z = vs (Ñ ), we can have the following formula:
+                                                                X         kC        vs (Ñ )
+                                                  vs =                           · vC,s      .
+                                                                        vs (Ñ )
+                                                             ∅̸=C⊆Ñ
+
+
+
+
+                                           P|Ñ |
+Proposition C.2. Given the condition that i=1 ϕi (Rt ) = Rt , the payoff allocation defined on
+returns Rt , can be expressed as:
+                                     X                                         
+                    ϕi (Rt ) := Rt −    ϕj (V (Ñ , st )) − γϕj (V (Ñ , st+1 )) .
+                                                      j̸=i
+
+
+                                                                        16
+Proof. Recall that ϕ(·) ∈ R|Ñ | is a multidimensional linear transformation, where n is the number
+of agents. We now define ϕ(Rt ) by introducing Efficiency axiom. To satisfy the Efficiency axiom
+           P|Ñ |                                                                     P|Ñ |
+such that i=1 ϕi (V (Ñ , st )) = V (Ñ , st ), it is reasonable to assume that i=1 ϕi (Rt ) = Rt . In
+other words, each agent’s value expansion can be expressed independently with its own ϕi (Rt ),
+which can be justified by Theorem 4.5. Next, we show how each ϕi (Rt ) is approximated by
+ϕ(V (Ñ , st )). It is not difficult to observe that for each agent i ∈ Ñ , we have that ϕi (V (Ñ , st )) =
+                                                         P|Ñ |
+ϕi (Rt ) + γϕi (V (Ñ , st+1 )). By the condition that i=1 ϕi (Rt ) = Rt , we can derive that ϕi (Rt ) =
+       P
+Rt − j̸=i ϕj (Rt ). Since ϕj (Rt ) = ϕj (V (Ñ , st )) − γϕj (V (Ñ , st+1 )), we get the formula of
+ϕi (Rt ) that
+                                          X                                           
+                       ϕi (Rt ) := Rt −        ϕj (V (Ñ , st )) − γϕj (V (Ñ , st+1 )) .
+                                       j̸=i
+
+
+
+
+                                                                                       1
+Proposition C.3. For the class of superadditive games formed by a set of basis games {vC,s |∅ ̸=
+C ⊆ Ñ }, it holds that kC ≥ 0, for all ∅ ̸= C ⊆ Ñ .
+
+
+Proof. We first consider a characteristic function game space G (a broader space of superadditive
+games). Each game v : G → R≥0 belonging to G can be uniquely represented as
+                                               X
+                                                         1
+                                         v=          kC vC .
+                                                 ∅̸=C⊆Ñ
+
+The analytic form of kC under G is represented as follows:
+                                         X
+                                  kC =       (−1)|C|−|T | v(T ),
+                                              T ⊆C
+
+where v : G → R+ is a value function of a game belonging to G. The condition of superadditive
+games is as follows:
+                                 v(T ∪ C) ≥ v(T ) + v(C).
+
+It has been proved that if the above condition holds, kC ≥ 0 has to be fulfilling [43, 16].
+We now extend the G to a subgame space G(s), for a fixed state s ∈ S. The characteristics fulfilling in
+G also holds in G(s), since the subgame space G(s) is isomorphic to a game space
+                                                                             P G. More detailed,
+                                                                                               1
+every result above holds for vs : G(s) → R≥0 , uniquely represented as vs = ∅̸=C⊆Ñ kC vC,s        .
+As we consider G(s) as a space of superadditive games, kC ≥ 0 still holds.
+
+Proposition C.4. Shapley Machine is an algorithm that fulfills Efficiency, Additivity and Symmetry,
+so it learns Vi as Shapley values for dynamic scenarios.
+
+
+Proof. Shapley Machine follows Efficiency, Additivity and Symmetry in implementation, as well as
+each subspace G(s) is isomorphic to the original cooperative game space G. As per Theorem 2.2, we
+can get the conclusion.
+
+
+D     Experimental Details
+
+D.1   Implementation Details
+
+Our algorithm is built upon POAM and all loss functions for training the encoder-decoder model
+and related loss functions of PPO have been remained. Please refer to Appendix A.3 for details. For
+conciseness, we only list the novel loss functions proposed in this paper as below.
+
+
+                                                     17
+D.1.1   Shapley Machine
+We now describe the details about the implementation of our proposed algorithm, referred to as
+Shapley Machine. In general, our algorithm is established based on POAM [6], with modification to
+fulfill all the three axioms of Shapley value: Efficiency, Additivity and Symmetry. Since Symmetry
+has been implemented by incorporating embedding vectors to represent other agents’ characteristics
+from each agent’s view, we only need to fulfill Efficiency and Additivity.
+Implementing Additivity. In general, POAM has implemented a version of Additivity using
+TD(λ), which does not strictly conform to the principle of determining the number of n-step return
+components. Instead, we change TD(λ) to TTD(λ), for which the number of components is equal to
+the number of the non-empty coalitions in theory. Note that in some scenarios the episode length is
+smaller than the number of non-empty coalitions. In these cases, TTD(λ) can be optionally reduced
+to the TD(λ) for the finite-horizon tasks with the episode length as T , equivalently, the TTD(λ) with
+m = T . Alternatively, we can select an empirical value of m for each task. In this paper, we set
+m = T for the scenarios 8v9 and 10v11.
+Implementing Efficiency. Recall that we have derived the condition for realizing the Efficiency
+axiom such that:                       X
+                          Rt,i = Rt −     (Vj (st ) − γVj (st+1 )) ,
+                                                  j̸=i
+
+where Vj (st ) indicates an agent j’s value estimation. During the practical training procedure the
+Vj (st ) could be severely inaccurate in the beginning, which may resultP  in the instability of learning.
+To mitigate this issue, we add an extra coefficient α ∈ (0, 1) to the term j̸=i (Vj (st ) − γVj (st+1 )),
+such that:                                  X c                          
+                                                                   c
+                            Rt,i = Rt − α         Vjθ (st ) − γVjθ (st+1 ) .                          (22)
+                                                 j̸=i
+This coefficient α can be either manually set up as a fixed value, or implemented by a scheduler
+starting from 0 to some preset upper limit. Rt in Lθ (ht,i , at,i ) and Lθc (ht,i ) is replaced by the above
+Rt,i . To clarify this change, we the two new losses are expressed as: L̂θ (ht,i , at,i ) and L̂θc (ht,i ).
+Furthermore, it is needed to search the underlying factorization scheme of the transition function in
+Dec-POMDP, according to Theorem 4.5. To fulfill this, we need to fulfill the following condition:
+                                         |Ñ |
+                                         X
+                                                 Vi (st ) = V (Ñ , st ).                              (23)
+                                         i=1
+
+The above equality is implemented as a regularization term during training. In the main paper, we
+have defined a Bellman equation characterizing the global value V (Ñ , st ), such that
+                                            h                       i
+                           V (Ñ , st ) = Eπ Rt + γV (Ñ , st+1 )|st .
+
+To maintain consistency with the critic losses, we consider λ-returns and the above equation can be
+extended as:
+                                     V (Ñ , st ) = Eπ Gλt |st ,
+                                                             
+
+where each Gt:t+n forming the Gλt is expressed as follows:
+                    Gt:t+n = Rt + γRt+1 + · · · + γ n−1 Rt+n + γ n V (Ñ , st+n ).
+By incorporating the condition Eq. (23) into the above formula, we can obtain the regularization term
+referred to as the efficiency loss, as follows:
+                                                                     2
+                                                       |Ñ |
+                                              1        X        c
+                                Leθc (ht,i ) = Ĝλt −       Viθ (st ) ,
+                                              2        i=1
+
+where each Ĝt:t+n forming the Ĝλt is expressed as follows:
+                                                                                |Ñ |
+                                                                                X          c
+                                                              n             n
+                    Ĝt:t+n = Rt + γRt+1 + · · · + γ Rt+n + γ                           Viθ (st+n ).
+                                                                                i=1
+
+
+                                                         18
+In summary, the total loss function of Shapley Machine is as follows:
+                                                                                          
+                         T
+                     1  X      X                           X
+             LSM =                L̂θ (ht,i , at,i ) + β1   L̂θc (ht,i ) + β2 Leθc (ht,i ) ,
+                     T t=1
+                                i∈C̃t                      i∈Ñ
+
+where T is the episode length; β1 , β2 ∈ (0, 1) are two coefficients to control the importance of the
+two losses; as well as C̃t indicates the controlled agent set at timestep t and Ñ indicates the ad hoc
+team following the convention in [6].
+
+D.1.2    POAM
+The implementation of POAM follows [6], which has been detailed in Appendix A.3. In summary,
+the total loss function of POAM is as follows:
+                                                                              
+                                 T
+                              1 X      X                          X
+                      LPOAM =             Lθ (ht,i , at,i ) + β1   Lθc (ht,i ) .
+                              T t=1
+                                          i∈C̃t                     i∈Ñ
+
+
+D.2     Banzhaf Machine
+
+The total loss function and the implementation of Banzhaf Machine are close to POAM, the only
+difference for which is that Banzhaf Machine uses TTD(λ) instead of TD(λ) that has been used in
+POAM.
+
+D.3     Experimental Domains
+
+We now briefly introduce the experimental domains for running experiments. If one would like to
+know more about details, please refer to [6].
+
+D.3.1    MPE-PP
+The mpe-pp environment is a predator-prey task implemented within the Multi-Agent Particle
+Environment (MPE) framework. It simulates interactions within a two-dimensional space populated
+by two static obstacles, where three pursuer agents must cooperate to capture a single adversarial
+evader. A successful capture is defined as at least two pursuers simultaneously colliding with the
+evader, upon which the pursuers receive a positive reward of +1. If the capture is unsuccessful, no
+reward is granted. This environment is designed to test the ability of agents to coordinate under
+spatial and dynamic constraints.
+
+D.3.2    SMAC
+The StarCraft Multi-Agent Challenge (SMAC) serves as a benchmark suite for evaluating MARL
+algorithms in partially observable, cooperative settings. Built atop the StarCraft II game engine,
+SMAC presents a variety of micromanagement tasks where each agent (e.g., a Marine or Stalker)
+operates based on limited local observations and must coordinate actions with teammates to overcome
+enemy units. In this work, we focus on four specific SMAC scenarios: 5v6: Five allied Marines
+versus six enemy Marines, 8v9: Eight allied Marines versus nine enemy Marines, 10v11: Ten allied
+Marines versus eleven enemy Marines, 3s5z: Three allied Stalkers versus five enemy Zealots. At each
+timestep, agents receive a shaped reward proportional to the damage they inflict on opponents, along
+with bonus rewards of 10 points for each enemy defeated and 200 points for achieving overall victory
+by eliminating all adversaries. The total return is normalized so that the maximum achievable return
+in each scenario is 20. The action space in SMAC is discrete, enabling each agent to choose actions
+such as attacking a particular enemy, moving in a specific direction, or remaining idle. Notably, the
+variation in the number and type of agents and opponents across tasks results in scenario-specific
+observation and action space dimensionalities, thereby introducing further diversity and complexity
+for algorithmic evaluation. The length of an episode varies across different scenarios: MPE with
+T = 100, 3sv5z with T = 250, 5v6 with T = 70, 8v9 with T = 120 and 10v11 with T = 150.
+
+
+                                                     19
+D.4   Experimental Settings
+
+The training procedure of the n-agent ad hoc teamwork (NAHT) process is briefly introduced here.
+For more details, please refer to [6]. For each scenario (e.g. MPE, 3sv5z, 5v6, 8v9 and 10v11),
+there are five groups of pretrained agents acting the uncontrolled agents such as IQL, MAPPO, VDN,
+QMIX and IPPO. For each episode evaluation, the number of uncontrolled agents ũ is sampled, and
+then a group of the pretrained agents is sampled. Given that each task specifies a fixed total number of
+agents ñ, the number of controlled agents is computed as ñ − ũ. Note that this is still a special case
+of openness, since for a varying number of controlled agents the number of uncontrolled agents
+is also varied in correspondence, though with an upper limit due to the task specifications.
+The distributions for all sampling procedures are modeled as the multinational distribution with no
+replacement. Each uncontrolled agent conducts the greedy policy in both the training procedure and
+the testing procedure. In contrast, each controlled agent conducts the on-policy sampling by the
+parameterized policy (PPO in our algorithm) during the training procedure, while the greedy policy
+during the testing procedure.
+
+
+D.5   Hyperparameter Settings
+
+Since our algorithm is established based on POAM, most hyperparameter settings follow that in [6].
+First, the actors and critics are implemented in recurrent neural networks, with full parameter sharing.
+Specifically, they are implemented by two fully connected layers followed by a GRU layer and an
+output layer. Each layer has 64 dimensions with a ReLU activation function, and layer normalization
+is applied. The encoder-decoder networks for inferring agent characteristics are also implemented
+in parameter sharing. The encoder is implemented by a GRU layer, followed by a fully connected
+layer with a ReLU activation function and an output layer. The decoder is implemented by two fully
+connected layers with ReLU activation functions, followed by an output layer. Adam Optimizer is
+used to train all models. The detailed hyperparameter for experiments is shown in Tables 1 and 2.
+For the scenarios such as MPE, 3sv5z and 5v6, the values of m are set as the number of non-empty
+coalitions. For the scenarios such as 8v9 and 10v11, the values of P m is simply set as the length of an
+                                                                               c             c
+episode (see Appendix D.1 for more details). Note that the term j̸=i Vjθ (st ) − γVjθ (st+1 ) in
+shaped rewards has been standardised to match the scales of standardised rewards. To stabilize the
+learning processes for large-scale scenarios, the value loss clip have been added to Shapley Machine
+for 8v9 and 10v11.
+
+
+Table 1: Key hyperparameter of Shapley Machine: λ indicates the parameter for the weight-
+ing functions
+          P of TD(λ),       m indicates the number of basis games, α controls the importance of
+                      c           c
+the term j̸=i Vjθ (st ) − γVjθ (st+1 ) in Eq. (22), β1 controls the importance of the critic loss
+                                                                           e
+P
+   i∈Ñ Lθ (ht,i ), and β2 controls the importance of the efficiency loss Lθ c (ht,i ).
+          c
+
+                              Task       λ     m       α       β1      β2
+                              MPE 0.85         7      0.01 0.5 0.01
+                             3sv5z 0.85        7      0.01 0.5 0.01
+                              5v6      0.85 31 0.002 0.5 0.001
+                              8v9      0.95 120 0.01 0.5 0.001
+                             10v11 0.95 150 0.01 0.5 0.001
+
+
+
+
+D.6   Computational Resources
+
+All experiments are conducted on Intel Xeon Gold 6230 CPUs and Nvidia V100-SXM2 GPUs. Each
+experiment run on MPE takes approximately 7 hours, utilizing 20 CPU cores and 1 GPU. Each
+experiment run on SMAC takes between 8 and 19 hours, utilizing 30 CPU cores and 1 GPU. All
+experiments are trained with 20M timesteps.
+
+
+                                                  20
+                                Table 2: Common hyperparameter for RL settings.
+                                           Hyperparameter       Value
+                                                 LR            0.0005
+                                               Epochs             5
+                                             Minibatches          1
+                                              Buffer size        256
+                                          Entropy coefficient   0.05
+                                                 Clip            0.2
+                                               ED LR           0.0005
+                                              ED epochs           1
+                                           ED Minibatches         1
+                                         Optim_alpha (Adam)     0.99
+                                          Optim_eps (Adam)    0.00001
+                                            Use_obs_norm        True
+                                         Use_orthogonal_init    True
+                                             Use_adv_std        True
+                                         Standardise_rewards    True
+                                          num_parallel_envs       8
+
+
+E     Additional Experiments
+E.1    Analyzing Effects of Efficiency Axioms
+
+We now demonstrate the association between the changing of the mean shaping rewards and the
+corresponding response of testing returns. As shown in Figures 6, the shaped rewards normally
+increases in the beginning and then gradually decreases to a plateau. The efficiency loss also exhibits
+the similar phenomenon. As shown in Figure 7, it can be observed that when the perturbation happens
+during training (as evidenced by test returns), the shaped rewards can consistently manifest this
+situation (as highlighted in red vertical dashed lines). This feature is crucial in NAHT, since it is
+a common case when an unseen agent appears in the environment, which may perturb the training
+stability. This justifies the practical effectiveness of the shaping rewards Rt,i we propose to fulfill the
+Efficiency axiom.
+
+               Test Return                                 Shaped Reward                                 Efficiency Loss
+                                             0.16
+                                                                                          120
+15                                           0.14
+                                             0.12                                         100
+10                                           0.10                                          80
+ 5                                           0.08
+                                                                                           60
+                                             0.06
+ 0                                           0.04                                          40
+
+ 5                                           0.02                                          20
+                                             0.00
+                                                                                            0
+ 0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00 0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00 0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00
+                Timesteps             1e7                     Timesteps             1e7                     Timesteps             1e7
+
+
+ Figure 6: One run of MPE to show the variation of test return, shaped reward and efficiency loss.
+
+
+E.2    Potential Reasons for Instability for Large-Scale Scenarios
+
+During our trials, we observed that the performance of Shapley Machine was unstable in large-scale
+scenarios, such as 8v9 and 10v11. We now analyze the potential reason behind this phenomenon. As
+observed from Figures 8 and 9, it can be justified that the instability of shaped rewards is the key reason
+to cause the unstable learning progresses for large-scale scenarios. As discussed in Appendix E.1,
+we hypothesize that the instability is caused
+                                        P by the        the shaping reward terms constituted of instable
+                                                     c             c
+changing of values (critics), such as j̸=i Vjθ (st ) − γVjθ (st+1 ) . To mitigate this issue, we
+propose to add the value loss clip to stabilize the learning progresses of value functions for the
+scenarios such as 8v9 and 10v11.
+
+
+                                                                 21
+               Test Return                                   Shaped Reward                                      Efficiency Loss
+16
+14                                           0.08                                         120
+12                                                                                        100
+                                             0.06
+10                                                                                         80
+ 8                                           0.04                                          60
+ 6                                                                                         40
+                                             0.02
+ 4                                                                                         20
+ 2                                                                                          0
+ 0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00 0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00 0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00
+                Timesteps              1e7                      Timesteps                 1e7                      Timesteps      1e7
+
+
+  Figure 7: One run of 5v6 to show the variation of test return, shaped reward and efficiency loss.
+
+                                    Mean Test Return                                Mean Shaped Reward
+                       18                                               0.08
+                       16                                               0.06
+                       14
+                       12                                               0.04
+                       10
+                        8                                               0.02
+                        6
+                                                                        0.00
+                        4
+                        2                                               0.02
+                        0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00       0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00
+                                        Timesteps              1e7                         Timesteps              1e7
+
+
+Figure 8: A case of 8v9 to show the instability of learning progress via the mean shaped rewards.
+The range bounded by two red dashed lines shows the fluctuation of the learning process.
+
+
+As shown in Figure 10, the learning processes with the value loss clip apparently perform more stable
+than those without. This verifies our initial hypothesis. Due to this strategy will slow down and even
+hinder the performance for the other three scenarios, we have not posted this as a common strategy.
+We believe this warrants further investigation in future work before any claims can be made
+about its general performance.
+
+E.3    Further Evidence on the Benefit of Structured Algorithm
+
+In addition to the presentation of critic losses in the main of paper, we also present the entropy of
+policies in Figure 11. Consistent with the critic losses, the entropy of Shapley Machine decreases
+faster than POAM, which is a strong evidence to show the power of structured value functions in
+Shapley values as each agent’s credit during training.
+
+E.4    Relationship between the Number and the Values of Basis Games
+
+The values of basis games are set up by the probability values of a geometric distribution governed by
+λ in this paper, respecting the convention of RL. As a result, the λ value will influence the shape of the
+geometric distribution. When the λ value grows larger, the geometric distribution tends to be a longer
+
+                                    Mean Test Return                                Mean Shaped Reward
+                       20                                               0.07
+                       18                                               0.06
+                       16                                               0.05
+                       14                                               0.04
+                       12                                               0.03
+                       10                                               0.02
+                        8                                               0.01
+                        6                                               0.00
+                        4                                               0.01
+                        0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00       0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00
+                                        Timesteps              1e7                         Timesteps              1e7
+
+
+Figure 9: A case of 10v11 to show the instability of learning progress via the mean shaped rewards.
+The range bounded by two red dashed lines shows the fluctuation of the learning process.
+
+
+                                                                       22
+                                                                                                  8v9                                                             10v11
+                                                                0.8
+                                                                                                                                     0.8
+
+
+
+
+                                                Mean Win Rate
+                                                                0.6
+                                                                                                                                     0.6
+                                                                0.4                                                                  0.4
+                                                                0.2                                                                  0.2
+                                                                                                 w/ value loss clip                                               w/ value loss clip
+                                                                0.0
+                                                                                                 w/o value loss clip
+                                                                                                              0.0
+                                                                                                                                                                  w/o value loss clip
+                                                                  0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00 0.00 0.25 0.50 0.75 1.00 1.25 1.50 1.75 2.00
+                                                                                               Timesteps                     1e7                               Timesteps                         1e7
+
+
+Figure 10: Comparison between stability of learning processes with and without the value loss clip in
+the 8v9 and 10v11 scenarios.
+                               mpe-pp                                                5v6                    0.400
+                                                                                                                               3sv5z                    0.28
+                                                                                                                                                                           8v9                                   10v11
+1.6                                                                                                                                                                                             0.23            POAM
+                                                                0.40                                        0.375
+1.5                                                                                                                                                     0.26                                    0.22            Shapley Machine
+                                                                                                            0.350
+                                                                0.35                                                                                                                            0.21
+                                                                                                            0.325                                       0.24
+1.4                                                             0.30                                                                                                                            0.20
+                                                                                                            0.300
+1.3                                                                                                         0.275                                       0.22                                    0.19
+                                                                0.25
+                                                                                                            0.250                                                                               0.18
+1.2                                                             0.20                                                                                    0.20                                    0.17
+                                                                                                            0.225
+1.1                                                   0.15                                                  0.200                                       0.18                                    0.16
+   0.0             0.5           1.0     1.5      2.0     0.0                0.5         1.0     1.5    2.0      0.0   0.5         1.0     1.5    2.0       0.0    0.5      1.0      1.5    2.0     0.0   0.5      1.0      1.5    2.0
+                          Timesteps             1e7                                Timesteps           1e7                   Timesteps           1e7                     Timesteps         1e7                  Timesteps         1e7
+
+
+
+                                Figure 11: Entropy of policies across all scenarios during the training procedure.
+
+
+tail with the probability decays slowly as m increases, and vice versa. In other words, controlling the
+number of basis games can be implemented by simply changing the values of basis games, or
+equivalently, the λ value, under the assumption of the geometric distribution. This is consistent
+with the insight from RL. To verify this result still holding in NAHT, we conduct a case study, as
+shown in Figure 12. It can be observed that the number of active basis games for m = 31 and m = 70
+is the same under λ = 0.85, resulting in nearly identical learning performance. This aligns with the
+conventional view of λ’s impact on TD(λ) in reinforcement learning, primarily as a mechanism
+for controlling the tail length of the return.
+
+                                                 5v6
+                         0.6
+                         0.5
+
+
+
+
+         Mean Win Rate
+                         0.4
+                         0.3
+                         0.2
+                         0.1                                           m = 70
+                         0.0
+                                                                       m = 31
+                            0.0         0.5         1.0                1.5         2.0
+                                              Timesteps                        1e7
+
+
+           (a) Shapley Machine: m = (b) Demonstration of the shape the basis game values with m = 7 and
+           31 vs. m = 70 for λ = 0.85. λ = 0.85.
+Figure 12: Controlling the number of active basis games can be implemented by changing the
+parameters to control the shape of basis game values. Note that the probability values for m > 31 are
+nearly zero.
+
+In addition, we demonstrate that even with the same number of basis games, their specific values
+significantly influence the learning process. As shown in Figure 13, given the same number of
+active basis games as m = 7, the learning processes with λ = 0.5 and λ = 0.85 result in diverse
+performance. This provides an alternative insight into how λ influences TD(λ), diverging from
+the traditional reinforcement learning perspective.
+
+E.5                  Empirical m values and Number of Agents
+
+We now investigate the relationship between the empirical m values and the number of agents, to
+tackle some scenarios where the length of an episode T is far smaller than the theoretical value of
+
+
+                                                                                                                               23
+                                      mpe-pp
+                      15
+
+
+
+
+   Mean Test Return
+                      10
+                       5
+                       0
+                                                                 = 0.5
+                       5                                         = 0.85
+                       0.0     0.5        1.0                    1.5      2.0
+                                     Timesteps                         1e7
+
+
+      (a) Shapley Machine: λ = (b) Demonstration of the shapes of the basis game values with m = 7,
+      0.5 vs. λ = 0.85 for m = 7. for λ = 0.5 and λ = 0.85, respectively.
+Figure 13: The influence of different values of basis games given the same number of active basis
+games. Note that the shapes of the geometric distributions vary significantly with different values of
+λ, under the same number of active m.
+
+
+m, especially when the number of agents is large. We have demonstrated that for the case with 5
+agents the empirical effective value of m is 20. To prove the claim that the empirical m values are
+still proportional to the number of agents, it is sufficient to show that m = 20 cannot work as well as
+the m set by larger values for the scenarios with more agents, such as the 8v9 and 10v11 scenarios.
+As shown in Figure 14, both the 8v9 and 10v11 scenarios demonstrate the better performance on the
+larger m values, set by the length of an episode. Therefore, we can conclude a law of empirical m
+values with respect to the number of agents, as shown in Figure 15. Empirically, m tends to grow
+as the number of agents increases.
+
+                                                                                     8v9                                       10v11
+                                                       0.8
+                                                                                                             0.8
+
+
+
+
+                                       Mean Win Rate
+                                                       0.6
+                                                                                                             0.6
+                                                       0.4                                                   0.4
+                                                       0.2                                                   0.2
+                                                                                               m=120                                      m=150
+                                                       0.0
+                                                                                               m=20          0.0
+                                                                                                                                          m=20
+                                                          0.0                0.5      1.0      1.5     2.0      0.0     0.5      1.0      1.5         2.0
+                                                                                   Timesteps         1e7                      Timesteps              1e7
+
+
+Figure 14: Comparison between the mean win rates of m = 20 and m = 120 in the 8v9 and 10v11
+scenarios.
+
+
+                                                                 150
+
+
+                                                                 120
+
+
+
+
+                                                   Empirical m
+
+
+
+                                                                 31
+
+                                                                  7
+                                                                       3                       5                          8                     10
+                                                                                                     Number of agents
+
+                             Figure 15: The law of empirical m values with respect to the number of agents.
+
+
+
+                                                                                                       24
+                                  mpe-pp                                                     5v6                                     3sv5z                                    8v9                                    10v11
+                                                                            0.6
+                                                                                                                    0.5                                      0.8
+                   15                                                       0.5                                                                                                                      0.8
+
+
+
+
+Mean Test Return                                            Mean Win Rate
+                                                                                                                    0.4                                      0.6
+                   10                                                       0.4                                                                                                                      0.6
+                                                                                                                    0.3
+                    5             POAM
+                                                                            0.3
+                                                                                      POAM                                         POAM                      0.4        POAM                                    POAM
+                                                                                                                                    = 0, 2 = 0                           = 0, 2 = 0                  0.4         = 0, 2 = 0
+                                   = 0, 2 = 0                               0.2        = 0, 2 = 0                   0.2
+                    0              = 0.01, 2 = 0.01                                    = 0.002, 2 = 0.001                           = 0.01, 2 = 0.01         0.2         = 0.01, 2 = 0.001           0.2
+                                                                                                                                                                                                                 = 0.01, 2 = 0.001
+                                   = 0.01, 2 = 0                            0.1        = 0.002, 2 = 0               0.1             = 0.01, 2 = 0                        = 0.01, 2 = 0                           = 0.01, 2 = 0
+                    5              = 0, 2 = 0.01                                       = 0, 2 = 0.001                               = 0, 2 = 0.01                        = 0, 2 = 0.001                          = 0, 2 = 0.001
+                                                                            0.0                                     0.0                                      0.0                                     0.0
+                    0.0    0.5      1.0      1.5      2.0                      0.0   0.5      1.0      1.5    2.0      0.0   0.5      1.0      1.5     2.0      0.0   0.5      1.0      1.5    2.0      0.0   0.5      1.0      1.5    2.0
+                                 Timesteps         1e7                                     Timesteps         1e7                   Timesteps         1e7                    Timesteps         1e7                   Timesteps         1e7
+
+
+
+Figure 16: Ablation studies of Shapley Machine on all experimental domains. The Shapley Machine
+ablation variants are labelled as the α and β2 settings.
+
+
+E.6                       Ablation Studies
+
+We conducted ablation studies across all experimental domains to assess the effectiveness of our
+proposed algorithm, Shapley Machine. As shown in Figure 16, all the shaped reward terms, efficiency
+loss components and truncated TD(λ) inspired by the cooperative games contribute meaningfully to
+performance in most scenarios.
+Specifically, in the MPE, 5v6 and 3sv5z scenarios, the superior performance of the Shapley Machine
+variant with α = 0 and β2 = 0 over POAM highlights the effectiveness of using truncated horizons
+in TD(λ). In contrast, in the 8v9 and 10v11 scenarios, the setting of POAM is equivalent to this
+Shapley Machine variant, except that a value loss clip is applied in the latter. Therefore, the lack of
+superior performance by the Shapley Machine in these cases suggests that the value loss clip is not
+the primary factor driving its performance gains. Instead, it only works as a strategy to stabilize the
+performance of Shapley Machine for large-scale scenarios, as shown in the previous experimental
+results.
+Another noteworthy observation is that variants using only the efficiency loss still demonstrate
+competitive performance. This suggests that, in certain settings, the efficiency loss can approximate
+the Efficiency axiom, even if it does not formally guarantee that the resulting reward function satisfies
+it. Nonetheless, results from all scenarios except 8v9 highlight that fulfilling the Efficiency axiom on
+the reward function is critical for achieving effective performance. This indicates that earlier Shapley
+value-based MARL methods [11, 14], which did not enforce the Efficiency axiom on the reward, may
+have been less effective in scenarios where this axiom plays a pivotal role.
+
+F                       Broader Impacts
+The paper primarily emphasizes the positive societal impacts of its contributions, particularly in ad-
+vancing multi-agent learning algorithms through principled and interpretable design. By introducing
+an axiomatic framework and proposing the Shapley Machine algorithm, the work has the potential
+to promote the development of more trustworthy and transparent AI systems, reduce redundancy
+in algorithm design, and enhance understanding across the field. These outcomes could ultimately
+support broader societal goals involving reliable AI deployment in complex cooperative environments.
+While the paper, being theoretical in nature, does not explicitly explore negative societal impacts, it
+implicitly raises concerns about potential risks, especially when such multi-agent systems are applied
+in sensitive domains such as military operations.
+
+
+
+
+                                                                                                                                    25
+

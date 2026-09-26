@@ -1,0 +1,1308 @@
+                                                                                                                                Cover Page
+
+
+
+                                        SCoUT: Scalable Communication via Utility-Guided
+                                         Temporal Grouping in Multi-Agent Reinforcement
+                                                           Learning
+                                           Manav Vora, Gokul Puthumanaillam, Hiroyasu Tsukamoto, Melkior
+                                                                     Ornik
+                                         Keywords: Multi-Agent Reinforcement Learning, Communication Scheduling, Large Scale
+                                                                        Multi-Agent Systems.
+
+
+
+
+arXiv:2603.04833v1 [cs.MA] 5 Mar 2026
+                                                                                 Summary
+                                            Learning communication can improve coordination in partially observed MARL, but scal-
+                                        ing to large teams is difficult because (i) deciding when and with whom to communicate induces
+                                        many coupled discrete choices and (ii) the effect of any single message is hard to isolate for
+                                        learning. We propose SCoUT (Scalable Communication via Utility-guided Temporal group-
+                                        ing), a scalable learned-communication method that introduces temporal and agent abstraction
+                                        for learned communication. SCoUT resamples soft agent groups every K steps to induce a
+                                        differentiable affinity that biases recipient selection, while a group-aware critic predicts group-
+                                        level values and maps them to per-agent baselines to reduce critic complexity. To obtain precise
+                                        learning signals for communication, SCoUT uses counterfactual mailbox-based advantages
+                                        that isolate the contribution of individual messages for both send and recipient decisions. Ex-
+                                        periments on benchmarks show that SCoUT remains effective as the agent population grows
+                                        to hundreds, whereas prior learned-communication baselines degrade with scale.
+
+
+
+
+                                                                            Contribution(s)
+                                        1. SCoUT, a scalable learned-communication method that resamples soft agent groups ev-
+                                           ery K environment steps and uses the induced affinity as a differentiable bias over per-step
+                                           recipient selection. This temporally-extended soft-grouping mechanism turns per-step com-
+                                           binatorial link selection over 2N (N −1) possible directed communication graphs into struc-
+                                           tured, differentiable routing guided by group affinities during training.
+                                           Context: Prior selective communication methods typically re-decide communication
+                                           structure at every step via scheduling (Kim et al., 2019), attention-based routing (Das et al.,
+                                           2019), or imposing a global topology (Li et al., 2025); SCoUT instead introduces a slowly
+                                           varying latent structure that guides routing without hard constraints.
+                                        2. A group-aware critic that predicts group-level values from global information and maps
+                                           them to per-agent value baselines through the soft grouping assignments, reducing critic
+                                           output complexity and stabilizing CTDE training in large populations.
+                                           Context: This differs from monolithic centralized critics in standard CTDE baselines (Yu
+                                           et al., 2022) and is complementary to value-factorization methods (Rashid et al., 2020)
+                                           because the factorization is tied to the learned communication structure in our setting.
+                                        3. A counterfactual mailbox credit-assignment rule that yields learning signals for both the bi-
+                                           nary send action and recipient selection by comparing the recipient’s predicted value under
+                                           the actual mailbox versus a leave-one-out (counterfactual) mailbox.
+                                           Context: Inspired by counterfactual baselines in multi-agent actor-critic learning (Foerster
+                                           et al., 2018), but specialized to communication by isolating the marginal contribution of
+                                           individual messages.
+                                        4. Empirical evaluations on large-population benchmarks showing that SCoUT can be trained
+                                           efficiently in scenarios with hundreds of agents and improves performance over learned-
+                                           communication baselines as population size grows.
+                                           Context: We consider scenarios with roughly 1.6× and 12× more controlled agents than
+                                           prior work in Battle and Pursuit respectively.
+SCoUT: Scalable Communication via Utility-Guided
+Temporal Grouping in Multi-Agent Reinforcement
+Learning
+Manav Vora, Gokul Puthumanaillam, Hiroyasu Tsukamoto, Melkior Ornik
+mkvora2, gokulp2, hiroyasu, mornik@illinois.edu
+
+University of Illinois Urbana-Champaign
+
+
+                                           Abstract
+      Communication can improve coordination in partially observed multi-agent reinforce-
+      ment learning (MARL), but learning when and who to communicate with requires
+      choosing among many possible sender-recipient pairs, and the effect of any sin-
+      gle message on future reward is hard to isolate. We introduce SCoUT (Scalable
+      Communication via Utility-guided Temporal grouping), which addresses both these
+      challenges via temporal and agent abstraction within traditional MARL. During train-
+      ing, SCoUT resamples soft agent groups every K environment steps (macro-steps) via
+      Gumbel-Softmax; these groups are latent clusters that induce an affinity used as a dif-
+      ferentiable prior over recipients. Using the same assignments, a group-aware critic
+      predicts values for each agent group and maps them to per-agent baselines through
+      the same soft assignments, reducing critic complexity and variance. Each agent is
+      trained with a three-headed policy: environment action, send decision, and recipient
+      selection. To obtain precise communication learning signals, we derive counterfactual
+      communication advantages by analytically removing each sender’s contribution from
+      the recipient’s aggregated messages. This counterfactual computation enables precise
+      credit assignment for both send and recipient-selection decisions. At execution time,
+      all centralized training components are discarded and only the per-agent policy is run,
+      preserving decentralized execution. Experiments on large-scale benchmarks show that
+      SCoUT learns targeted communication and remains effective in large scenarios, while
+      prior methods degrade as the population grows. Finally, ablations confirm that temporal
+      grouping and counterfactual communication credit are both critical for scalability.
+      Project website, videos and code: https://scout-comm.github.io/
+
+
+
+1   Introduction
+
+Communication is a natural mechanism for coordination in partially observed multi-agent reinforce-
+ment learning (MARL): exchanging local information or intent can mitigate limited individual views
+and help synchronize behavior toward a shared objective (Bernstein et al., 2002; Hernandez-Leal
+et al., 2019; Buşoniu et al., 2008). Accordingly, recent work learns communication protocols and
+routing decisions end-to-end alongside agent policies, rather than prescribing a fixed topology or
+hand-designed messages (Niu et al., 2021; Li et al., 2021). Yet scaling learned communication be-
+yond small teams remains difficult, with growing computational cost and training instability as the
+agent population increases (Li et al., 2021).
+A key bottleneck in scaling learned communication is that deciding when and with whom to commu-
+nicate is inherently combinatorial: at each step, the team implicitly chooses a communication graph
+
+
+                                                1
+over N agents, yielding 2N (N −1) possible link patterns. Fully connected architectures avoid ex-
+plicit routing decisions but require O(N 2 ) message exchanges and aggregations per step, which can
+become costly and inject substantial irrelevant traffic as N grows (Sukhbaatar et al., 2016; Foerster
+et al., 2016). Selective communication methods reduce per-step communication and computation by
+gating or scheduling transmissions (Singh et al., 2019; Kim et al., 2019) or by learning targeted rout-
+ing with attention (Jiang & Lu, 2018; Das et al., 2019; Liu et al., 2020). However, these approaches
+are typically trained under centralized training with decentralized execution using actor-critic objec-
+tives, where centralized value functions provide learning signals for both environment actions and
+communication decisions (Lowe et al., 2017; Yu et al., 2022). As the population grows, two chal-
+lenges often persist at training time: (i) training-time scalability–critics and communication mod-
+ules must process high-dimensional, multi-agent information; and (ii) credit assignment–attributing
+downstream returns to specific messages and recipient choices when many communications jointly
+influence outcomes (Foerster et al., 2018). Empirically, learned-communication results are typically
+demonstrated at scales of O(10-100) agents (Li et al., 2025).
+To make learned communication feasible for large teams with hundreds of agents, we propose
+SCoUT (Scalable COmmunication via Utility-guided Temporal grouping), a training framework
+that introduces temporal and agent abstraction. The core idea is to treat the communication struc-
+ture as a slowly varying latent variable: every K environment steps (a macro-step), SCoUT re-
+samples a set of soft agent groups–a differentiable clustering of agents to a small number of latent
+groups–using differentiable categorical sampling (Jang et al., 2017; Maddison et al., 2017). These
+group affinities induce a differentiable prior over recipient selection and message aggregation in a
+one-step-latency mailbox, i.e., a per-agent message buffer of received messages from the previous
+step. The same group assignments also factor value estimation through a group-aware critic that
+predicts group-level values and maps them back to per-agent baselines, reducing critic complexity
+and variance. We train each agent with a three-headed PPO policy (environment action, send, recip-
+ient selection) (Schulman et al., 2017; 2016), and derive counterfactual communication advantages
+by analytically removing a sender’s contribution from a recipient’s aggregated mailbox, in the spirit
+of counterfactual baselines for multi-agent credit assignment (Foerster et al., 2018).
+
+Contributions.
+   (i) We introduce a temporally-extended soft-grouping mechanism for MARL communication,
+       that induces a learned distribution over recipients. This mechanism replaces per-step combi-
+       natorial link selection over 2N (N −1) possible directed communication graphs, with structured,
+       differentiable routing guided by group affinities.
+  (ii) We propose a group-aware critic that factors value prediction through soft groups and maps
+       group values back to per-agent baselines, improving the scalability and stability of CTDE
+       training in large populations.
+ (iii) We develop a counterfactual mailbox credit-assignment rule that yields direct learning signals
+       for both sending and recipient selection by analytically removing a sender’s contribution from
+       a recipient’s aggregated messages.
+At execution time, SCoUT discards centralized components (group sampler, critic, and counterfac-
+tual computations) and runs only the learned per-agent policy, preserving decentralized execution.
+We evaluate SCoUT on large-scale cooperative benchmarks from PettingZoo (Terry et al., 2021)
+and MAgent (Zheng et al., 2018), where it learns targeted communication while scaling to hundreds
+of agents and outperforming state-of-the-art baselines as population size grows; ablations in Pursuit
+isolate the impact of temporal grouping and counterfactual credit assignment.
+
+2   Related Work
+
+Foundations and CTDE training. Partially observed multi-agent decision-making is captured
+by decentralized control formalisms such as Dec-POMDPs (Bernstein et al., 2002) and by Markov
+games (Littman, 1994). Deep MARL commonly adopts centralized training with decentralized ex-
+
+
+                                                  2
+ecution (CTDE), using global information to train critics or value decompositions while execut-
+ing decentralized policies (Lowe et al., 2017; Foerster et al., 2018). Representative CTDE meth-
+ods include centralized critics (MADDPG) (Lowe et al., 2017), counterfactual actor–critic learning
+(COMA) (Foerster et al., 2018), and value factorization (VDN/QMIX, QTRAN, QPLEX) (Sunehag
+et al., 2018; Rashid et al., 2020; Son et al., 2019; Wang et al., 2021); PPO-style CTDE baselines such
+as MAPPO are also competitive (Schulman et al., 2017; Yu et al., 2022). As the number of agents
+grows, however, centralized critics can become a bottleneck: they must summarize high-dimensional
+interactions and provide low-variance learning signals. SCoUT addresses this by factoring value es-
+timation through soft groups and mapping group values to per-agent baselines.
+
+Learned communication in MARL. A long line of work learns differentiable communication
+end-to-end, enabling agents to exchange messages that improve coordination under partial observ-
+ability. CommNet aggregates broadcast-style continuous messages (Sukhbaatar et al., 2016), while
+DIAL/RIAL learn communication alongside decentralized policies with differentiable and discrete
+channels (Foerster et al., 2016). For large populations, dense communication becomes inefficient
+and noisy, and message utility is difficult to disentangle. Selective schemes reduce transmissions
+by learning when to communicate (IC3Net) (Singh et al., 2019) or scheduling a subset of speakers
+under bandwidth constraints (Kim et al., 2019). Yet these methods typically re-decide communica-
+tion each step and rely on centralized training signals, making credit assignment for communication
+increasingly challenging at scale. To alleviate this scalability issue, SCoUT introduces temporal ab-
+straction via soft groups that persist for K steps and a counterfactual mailbox signal that efficiently
+trains both sending and recipient selection.
+
+
+
+
+Figure 1: SCoUT forward-pass overview across two timescales. At each macro-step boundary tb , the
+grouping module samples soft assignments Ytb and forms an affinity matrix Gtb = Ytb Yt⊤           b
+                                                                                                    , which
+is held fixed over the subsequent K primitive steps and used as a log-bias log(Gtb ) for recipient
+selection. At each primitive step t, each agent embeds its local observation oit and mailbox input
+mit , updates a shared GRU backbone, and outputs a three-headed policy: environment action ait ,
+send decision cit , and recipient ρit . If cit = 1, the agent transmits message content xit = ztmsg,i to the
+chosen recipient; recipients aggregate incoming messages into the next-step mailbox.
+
+
+Targeted routing, attention, and structure. Beyond “speak or stay silent,” targeted routing meth-
+ods learn with whom to communicate. ATOC forms temporary coordination groups via attention
+(Jiang & Lu, 2018), TarMAC learns attention-based addressing (Das et al., 2019), and G2ANet mod-
+els relations with multi-stage attention (Liu et al., 2020); ToM2C incorporates Theory-of-Mind-style
+inference (Wang et al., 2022). These approaches provide richer structure than broadcasting but often
+evaluate routing over many potential recipients and can be expensive or unstable when recomputed
+at every step for large N . In parallel, topology-design approaches advocate fixed global structures;
+
+
+                                                     3
+for example, ExpoComm leverages exponential-graph topologies for small-diameter dissemination
+(Li et al., 2025). SCoUT sits between these directions by learning a task-adaptive grouping structure
+that changes slowly over time and acts as a structured bias over recipient selection, without fixed
+topology or per-step global rerouting.
+
+Scalability and many-agent benchmarks. Scaling MARL has also been pursued via mean-field
+approximations that replace many-body interactions with aggregate effects (Yang et al., 2018). Stan-
+dardized benchmarks enable evaluation across regimes, including SMAC (Samvelyan et al., 2019)
+and many-agent gridworlds in MAgent (Zheng et al., 2018). SCoUT is motivated by large finite
+populations with heterogeneous local observations and structured coordination needs, where dense
+communication and monolithic critics become impractical and credit assignment for communication
+decisions is particularly acute.
+
+3    Problem Setting
+
+We consider cooperative multi-agent reinforcement learning under partial observability, modeled as
+a decentralized partially observable Markov decision process (Dec-POMDP) (Bernstein et al., 2002).
+A Dec-POMDP is defined by ⟨S, {Ai }N                             N
+                                                i=1 , P, r, {Oi }i=1 , Z, γ⟩, where st ∈ S is the environment
+state, each agent i ∈ {1, . . . , N } selects an environment action ait ∈ Ai , the transition kernel is
+                                                                                      1          N
+P(st+1 | st , a1t , . . . , aN
+                             t ), and all agents share a cooperative reward r(st , at , . . . , at ) with discount
+factor γ ∈ (0, 1). Each agent receives a local observation ot ∈ Oi emitted by Z(o1t , . . . , oN
+                                                                        i
+                                                                                                           t | st )
+and acts based on its local history hit = (oi1:t , ai1:t−1 ).
+
+Communication interface. In addition to environment actions, agents may communicate over a
+directed, point-to-point channel. At time t, agent i chooses (i) a binary send decision cit ∈ {0, 1},
+(ii) if cit = 1, a recipient index ρit ∈ {1, . . . , N }, and (iii) a message vector xit ∈ X ⊆ Rd with
+fixed dimension d. We assume a synchronous one-step latency: messages sent at time t are available
+to recipients at time t+1. Since a recipient may receive multiple messages in the same step, we
+represent its incoming communication by a fixed-dimensional mailbox vector mjt+1 ∈ Rdm obtained
+via an aggregation operator
+                                 mjt+1 = g {xit : cit = 1, ρit = j} ,
+                                                                         
+
+where g maps a multiset of incoming messages to a single vector and mjt+1 = 0 if no messages are
+addressed to j.
+
+Policies and objective. A stochastic decentralized policy for agent i is a conditional distribution
+over its decisions given its local information, i.e., π i (· | hit , mit ). We assume parameter sharing and
+use a single policy πθ for all agents (Christianos et al., 2021; Terry et al., 2020):
+                         (ait , cit , xit , ρit ) ∼ πθ (· | hit , mit ),        ∀i ∈ {1, . . . , N }.
+This induces a joint policy that factorizes across agents conditioned on their local inputs,
+                                                                 N
+                                                                 Y
+                       π θ (at , ct , xt , ρt | ht , mt ) =            πθ (ait , cit , xit , ρit | hit , mit ).
+                                                                 i=1
+
+Our goal is to maximize the expected discounted team return
+                                          "∞                            #
+                                           X
+                                                t       1            N
+                            J(π θ ) = Eπθ     γ r(st , at , . . . , at ) .                                        (1)
+                                                         t=0
+
+
+Learning setup (CTDE). We adopt centralized training with decentralized execution (CTDE): at
+execution time, each agent acts using only (hit , mit ), while during training we may leverage addi-
+tional global information (which in our case is the global state) to learn critics or auxiliary compo-
+nents (Lowe et al., 2017; Foerster et al., 2018).
+
+
+                                                                4
+4     SCoUT
+
+We now describe our framework for scalable, utility-guided communication in cooperative MARL.
+SCoUT (i) introduces a slowly varying latent communication structure via soft grouping rather than
+re-deciding a dense communication graph at every step, (ii) uses this structure to simplify and factor
+value estimation through a group-aware critic, and (iii) trains targeted communication decisions,
+including the binary send action cit ∈ {0, 1} and recipient choice ρit , using counterfactual advantages
+that attribute utility to individual messages. Figure 1 provides a training forward-pass overview of
+SCoUT, highlighting the macro-step grouping and the per-step three-headed communication policy.
+
+4.1   Agent backbone and descriptors
+
+Each agent runs a shared recurrent backbone to maintain memory under partial observability. Let
+φ(·) embed the concatenated local observation and mailbox input. We maintain an internal recurrent
+state uit with a GRU (Cho et al., 2014):
+
+                                   uit = GRU φ([oit , mit ]), uit−1 .
+                                                                   
+
+
+From uit we compute a lightweight descriptor via two learned projections: (i) a grouping descrip-
+tor ztgrp,i , evaluated only every K steps (at macro-step boundaries), and (ii) a message descriptor
+ztmsg,i , used as message content when the agent transmits. All representation parameters are trained
+end-to-end through gradients from the policy and value objectives, as well as the grouping and com-
+munication components introduced below.
+
+4.2   Temporal soft grouping and affinity prior
+
+A central difficulty in large-team communication is that choosing a directed communication pattern
+at every step introduces many coupled discrete decisions; with sparse/delayed rewards, this can
+lead to high-variance gradients and brittle credit assignment. SCoUT mitigates this by introducing
+a slowly varying latent structure: every macro-step b (every K primitive steps), we sample soft
+groups that act as (i) a coarse, persistent notion of communication neighborhoods and (ii) a reusable
+structure for downstream components (see the top panel of Figure 1).
+Let tb denote the first primitive step of macro-step b. We assign each agent i to one of M ≪ N latent
+groups using its grouping descriptor ztgrp,i
+                                           b
+                                              and a set of learnable group prototypes {pg }M
+                                                                                           g=1 . Intu-
+itively, prototypes serve as anchor points, akin to soft k-means centroids. We compute assignment
+logits via cosine similarity:
+
+                                        ⟨ztgrp,i , pg ⟩
+                           ℓi,g
+                            tb = α ·
+                                            b
+                                                          ,       g ∈ {1, . . . , M },
+                                       ∥ztgrp,i
+                                           b
+                                                ∥ ∥pg ∥
+
+where α > 0 is a learnable scale. We then sample soft assignments with the Gumbel–Softmax
+reparameterization (Jang et al., 2017; Maddison et al., 2017):
+                                                    !
+                       i,g              ℓi,·
+                                         tb + ϵ
+                                                i,·
+                     Ytb = softmax                    , ϵi,g ∼ Gumbel(0, 1),
+                                             τ
+                                                              g
+
+
+with temperature τ , yielding Ytb ∈ RN ×M . Following common practice in differentiable pooling
+(Ying et al., 2018), we form an affinity matrix
+
+                                       Gtb = Ytb Yt⊤
+                                                   b
+                                                     ∈ RN ×N .
+
+where Gijtb is large when agents i and j are assigned to similar groups.This affinity is held fixed for
+the entire macro-step and serves as a differentiable prior over communication partners.
+
+
+                                                          5
+Grouping objective. Because grouping is a stochastic latent decision, we optimize it with a
+score-function objective (Williams, 1992) using a macro-step advantage signal. Let Pτi,g =
+softmax(ℓi,·                                                    grp,i
+          tb /τ )g denote the assignment probabilities and let Ab     denote the macro-step advan-
+tage produced by the group-aware critic (Section 4.4). We minimize
+
+                        Lgrp = LPG          bal         ent          edge
+                                grp + λbal Lgrp + λent Lgrp + λedge Lgrp ,
+
+where λbal , λent , λedge ≥ 0 are user-chosen coefficients controlling the strength of each regularizer.
+The policy-gradient term is
+
+                                        X N
+                                         X                    M
+                                                              X
+                             LPG
+                              grp = −                Agrp,i
+                                                      b              Yti,g
+                                                                       b
+                                                                           log Pτi,g ,
+                                         b   i=1              g=1
+
+which applies the score-function weight to the sampled assignment. We additionally regularize
+against degenerate or premature collapse:
+
+                             N               2                                           N
+                         1 X i      1                                               1 X
+               Lbal
+                grp =          Pτ −   1          ,                       Lent
+                                                                          grp = −         H(Pτi ),
+                         N i=1      M                                               N i=1
+                                             2
+
+where Lbal                                                    ent
+         grp encourages roughly balanced group usage and Lgrp encourages exploration early in
+                    edge
+training. Finally, Lgrp encourages the learned affinity Gtb to place higher weight on agent pairs
+whose communication is predicted to be useful under our learned pairwise utility signal (Sec-
+tion 4.5).
+
+4.3   Three-headed policy and mailbox communication
+
+Each agent uses a shared policy πθ (· | uit ) with three heads: (i) an environment-action head, (ii)
+a binary send head cit ∈ {0, 1}, and (iii) a recipient head over ρit ∈ {1, . . . , N }. The backbone
+produces two descriptors (Section 4.1): ztmsg,i ∈ Rd , used as the agent’s message representation,
+and ztgrp,i
+       b
+            , used for grouping at macro-step boundaries. When agent i sends (cit = 1), it transmits
+the message vector xit ≜ ztmsg,i ∈ Rd , and samples a recipient ρit from the recipient head (see the
+bottom panel of Figure 1).
+
+Recipient bias from group affinity. Let ϕrecv,i   t    ∈ RN denote the recipient logits produced by
+agent i’s policy head at time t. To encourage within-group communication without hard constraints,
+we add a macro-step-dependent log-bias derived from the affinity matrix Gtb :
+
+                     ϕ̃recv,i (j) = ϕrecv,i (j) + log Gij
+                                                             
+                       t             t                 tb + ε , j ∈ {1, . . . , N },
+
+where tb is the macro-step containing t and ε > 0 is a small constant. We then sample ρit from
+softmax(ϕ̃recv,i
+           t     ).
+
+Mailbox aggregation (choice of g). As defined in Section 3, a recipient may receive a variable
+number of incoming messages; we therefore map the multiset of received message vectors to a
+fixed-dimensional mailbox mjt+1 using an aggregation operator g(·). This provides a permutation-
+invariant, fixed-size input to the policy at the next step. In our implementation we choose a simple
+parameter-free scaled dot-product attention rule (Vaswani et al., 2017):
+                                                                             √ 
+                        j
+                                 X
+                                             i              exp ⟨xjt , xit ⟩/ d
+                     mt+1 =             wij xt , wij = P                        √ ,             (2)
+                                                               exp ⟨xjt , xit ⟩/ d
+                                                                              ′
+
+                               i: ρi =j
+                                 t                               ′
+                                                           i′ : ρit =j
+
+
+where d is the message dimension. Intuitively, the recipient’s own message descriptor xjt acts as a
+query that weights incoming message descriptors which act as keys and values.
+
+
+                                                       6
+4.4   Group-aware critic and grouping advantage
+
+Group-aware critic. Under CTDE, we learn a centralized value function that estimates expected
+discounted team return from the global state. To reduce output complexity for large populations,
+SCoUT predicts values at the group level and converts them into per-agent value baselines, used
+for advantage estimation, using the soft assignments. Concretely, given st , the critic outputs vt =
+[vt1 , . . . , vtM ]⊤ = Vψ (st ) ∈ RM , and the per-agent baseline is the assignment-weighted mixture
+
+                                             M
+                                             X
+                                     Vti =         Pτi,g vtg = Pτ vt i .
+                                                                    
+                                             g=1
+
+
+We train Vψ with the standard PPO/GAE value regression objective LV : we form bootstrapped
+targets from GAE (Schulman et al., 2016) and minimize a squared-error loss (Schulman et al., 2017).
+
+Grouping advantage. At each macro-step boundary tb , we derive an advantage signal for the
+grouping module by comparing the predicted per-agent value under the learned assignment to a
+permutation baseline. Let σ be a random permutation of {1, . . . , M } and define the permuted group-
+value vector (vtσb )g ≜ vtb ,σ(g) . We set
+
+                          Agrp,i                                            Pτ vtσb i
+                                                                                  
+                           b     =            Pτ vtb i              −                          .
+                                             | {z }                        | {z }
+                                     value under learned grouping       permutation baseline
+
+
+Subtracting the second term acts as a REINFORCE-style baseline. It preserves the scale of predicted
+values while being independent of the particular group labeling, and thus, reduces gradient variance
+for learning the grouping distribution (Williams, 1992; Greensmith et al., 2004).
+
+4.5   Communication critic and counterfactual mailbox credit assignment
+
+A core difficulty in learned communication is credit assignment: multiple simultaneous messages
+can jointly influence future rewards. SCoUT learns an auxiliary communication critic with two
+heads: (i) a message-conditioned value head Vωmsg for recipient evaluation, and (ii) a pairwise utility
+head Qω for sender–recipient utilities. We train this critic by minimizing squared one-step Temporal
+Difference (TD) errors (Sutton, 1988) over a batch of T primitive steps per update, using Polyak
+averaging (Polyak & Juditsky, 1992; Lillicrap et al., 2016).
+
+Counterfactual send advantage. For a sender i that addressed recipient j = ρit , we compute
+a counterfactual mailbox that removes i’s contribution while keeping all other incoming messages
+fixed, following the counterfactual credit assignment paradigm discussed in Foerster et al. (2018).
+                                                                     ′      ′      ′
+For a sender i that addressed recipient j = ρit , let mjt+1 = g({xit : cit = 1, ρit = j}), as defined
+in Section 3. We define the leave-one-outcounterfactual mailbox by removing        i’s message and
+                                    j\i            i′   i′        i′        ′
+re-applying the same aggregator mt+1 = g {xt : ct = 1, ρt = j, i ̸= i} . In our implementa-
+tion, where g is the parameter-free attention rule in (2), this reduces to a normalized leave-one-out
+attention aggregate:
+                               j\i
+                                          X                wi′ j          ′
+                            mt+1 =                  P                  xit .
+                                       ′
+                                       i ∈St (j)\{i}  k∈St (j)\{i} wkj
+
+
+Subsequently, we define the send advantage as
+
+                                                                            j\i 
+                 Asend,i                 j
+                         = Vωmsg st+1 , ft+1 (mjt+1 ) − Vωmsg st+1 , ft+1
+                                                                      j
+                                                     
+                  t                                                       (mt+1 ) ,
+
+       j
+where ft+1 (·) denotes the recipient feature construction with the specified mailbox input.
+
+                                                        7
+Recipient advantage and edge-utility alignment.       Let the pairwise utility matrix at time t be
+
+                                    Utij := Qω st+1 , fti , ft+1
+                                                             j 
+                                                                 ,
+
+for valid sender-recipient pairs (i, j). For a sender i with chosen recipient ρit , we form a centered
+recipient advantage
+                                                iρi    1 X ij
+                                  Arecv,i
+                                     t     = Ut t − i           Ut ,
+                                                     |Rt |    i
+                                                          j∈Rt
+
+where Rit is the set of possible recipients for i. To align grouping with communication utility,
+we define G̃i,·       i,·
+             tb and Ũtb as row-centered and ℓ2 -normalized versions of the affinity and utility rows
+respectively, and set
+                                                 N      i,·    i,·
+                                             1 X ⟨G̃tb , Ũtb ⟩
+                                 Ledge
+                                   grp = −                          .
+                                            N i=1 ∥G̃i,·        i,·
+                                                       tb ∥ ∥Ũtb ∥
+
+This is akin to computing cosine similarity between row vectors of two matrices (Brockmeier et al.,
+2017) and encourages groups to be communication-consistent: agents are grouped together when
+the learned utility predicts that they are useful communication partners, and pushed apart otherwise.
+
+4.6   Overall optimization and decentralized execution
+
+We train the three-headed policy with PPO (Schulman et al., 2017), using (i) standard GAE ad-
+vantages for environment actions (Schulman et al., 2016) and (ii) the communication advantages
+Asend,i
+  t     and Arecv,i
+             t      above for the send and recipient heads. Let Lenv    send   recv
+                                                                 PPO , LPPO , LPPO denote the stan-
+dard clipped PPO surrogates for each head with their corresponding advantages. The full objective
+combines policy, environment critic, communication critic, and grouping losses:
+
+                    L = Lenv    send   recv
+                         PPO + LPPO + LPPO + cV LV + cω Lω + cgrp Lgrp ,
+
+where Lω denotes the communication critic loss described in Section 4.5. The coefficients
+cV , cω , cgrp ≥ 0 are user-chosen scalar weights that trade off the auxiliary losses against the PPO
+policy losses; we treat them as hyperparameters. At test time, SCoUT discards centralized training
+components and executes only the shared decentralized policy per agent.
+
+5     Experiments
+
+We evaluate SC O UT on two large-population multi-agent benchmarks with two goals: (i) show that
+SC O UT can be trained directly at hundreds of agents while retaining strong coordination; and (ii)
+isolate which design choices drive these gains.
+
+5.1   Benchmarks
+
+MAgent Battle. We consider the BATTLE scenario in MAGENT (Zheng et al., 2018), a competitive
+two-team gridworld where each team must coordinate to eliminate the opposing team under a fixed
+episode horizon. At each step, each agent chooses to either move or attack; attacks reduce the target’s
+health, and agents are eliminated when their health reaches zero (additional details for BATTLE
+can be found in Appendix A.1). We evaluate four population scales: 20v20, 64v64, 81v81,
+and 100v100. Notably, prior structured-communication results on this benchmark are typically
+reported up to 64v64; our 81v81 and 100v100 settings explicitly stress-test scalability beyond
+that regime.
+
+Pursuit (SISL). We also evaluate on P URSUIT from the PettingZoo SISL suite (Terry et al., 2021),
+consisting of P pursuers and E evaders (E<P). An evader is captured when all free adjacent cells
+around it are occupied by pursuers; thus the required number of pursuers is 4 in open space, 3 along
+walls/obstacles, and 2 in corners (additional details for P URSUIT can be found in Appendix A.2). We
+
+
+                                                  8
+use P URSUIT primarily for targeted ablations to understand which components of SC O UT are nec-
+essary for strong coordination. We evaluate five scales: 20P-8E, 40P-16E, 60P-24E, 80P-32E,
+and 100P-40E. Unlike the default Pursuit configuration (8 pursuers, 30 evaders) (Terry et al., 2021;
+Gerstgrasser et al., 2023), we study regimes with E < P to stress-test scalability with respect to
+the number of learning agents while keeping capture milestones informative under a fixed 500-step
+horizon.
+
+                                               √ length K=10 and set the number of groups by a
+Across all benchmarks, we use a fixed macro-step
+simple scale-dependent rule. For Battle: M = ⌊ N ⌋ with N agents per team and for Pursuit: M =
+⌊E/2⌋ with E evaders. Appendix B summarizes all the hyperparameters used in the experiments
+and Appendix D presents a sensitivity study for the choice of M and K.
+Compute. All experiments were run on a machine with an NVIDIA L40 GPU and an AMD CPU
+(32 cores @ 4.1 GHz).
+
+5.2   Scalable competitive coordination on MAgent Battle
+
+Setup and claim under test. This experiment evaluates whether SC O UT maintains robust and
+decisive competitive coordination as population size grows. Unlike previous work emphasizing
+zero-shot transfer from small-N training, we train each method directly at the target scale (up to
+100v100), stressing optimization stability in the large-instance regime. All methods are trained for
+4M steps.
+
+Baselines. We compare against one non-communication baseline and several learned-
+communication baselines:
+   (i) Independent deep Q-learning (IDQN) (Rashid et al., 2020; Mnih et al., 2015), where each
+       agent learns from its local observation without explicit message exchange.
+  (ii) CommFormer (Hu et al., 2024) uses a transformer-style message encoder with attention over
+       other agents’ communication tokens, enabling content-based routing and richer interaction
+       modeling compared to fixed-topology schemes. We include it as a representative attention-
+       based learned-communication baseline.
+ (iii) ExpoComm (Li et al., 2025), designed for many-agent communication via exponential-
+       topology neighborhoods. We evaluate Peer-n=7 (time-varying neighborhood) and Static-
+       n=7 (fixed neighborhood) under the same per-agent recipient budget.
+Metrics and evaluation protocol. We evaluate each trained policy on 20 independent evaluation
+seeds per setting. We report: (i) win rate (% episodes where the red team finishes with more agents
+alive than the blue team); (ii) elimination rate (% blue eliminated, i.e., blue kills divided by N );
+and (iii) decisiveness via time-to-milestone: TT50 / TT75 = steps to reach 50% / 75% blue elimina-
+tion (horizon=200). We additionally report reach rates R50 /R75 , the % of evaluation episodes that
+reach each milestone within the horizon. We report TTk only when Rk ≥ 50% (otherwise, N/A).
+Furthermore, we plot training curves (episode return vs. environment steps; Figure 2) to assess
+optimization stability and sample efficiency when training directly at each target scale. Finally, to
+characterize how learned communication aligns with the discovered interaction structure, we report
+the in-group message fraction across all scales in Appendix C.3(Table 8). We also present qualitative
+rollouts for the 100v100 scenario (Appendix C.1).
+
+Results and discussion. Table 1 and Figure 2 show two consistent patterns1 . (1) SC O UT trains
+reliably across all scales and is highly repeatable. SC O UT achieves 100% win rate for all N
+and sustains near-complete elimination (95–99%), with elimination and milestone times exhibiting
+very low variance across 20 evaluation seeds. Training is similarly stable: across all four scales,
+SC O UT shows a clear improvement phase followed by stable convergence with substantially less
+across-seed dispersion than the baselines (Figure 2); notably, this stability persists even at the largest
+  1 CommFormer training curves are truncated for larger scales: 81v81 reached ≈50% of the planned 4M steps while
+
+100v100 reached ≈35% (both after 6 days, ∼4× the wall-clock budget used for SC O UT).
+
+
+                                                       9
+Figure 2: Battle training curves across scales. Episode return vs environment steps (shaded re-
+gions indicate variability across seeds). SC O UT learns rapidly and consistently across scales, while
+baselines exhibit substantial scale- and topology-sensitivity.
+
+Method             20v20      64v64     81v81     100v100        20v20      64v64           81v81        100v100
+
+Win rate (%)                                            Elimination rate (%) (blue eliminated / N )
+SC O UT         100.0±0.0 100.0±0.0 100.0±0.0 100.0±0.0    95±6            98±4             99±3          99±3
+ExpoComm         0.0±0.0 95.0±4.9 96.0±4.2 96.4±2.7        11±16          94±12             72±16         75±21
+ExpoComm-Static 0.0±0.0    0.0±0.0 60.0±11.0 65.0±10.7      3±8            1±2              57±30         36±10
+IDQN             0.0±0.0   0.0±0.0   0.0±0.0   0.0±0.0       0               0               7±2            0
+CommFormer       0.0±0.0   0.0±0.0   0.0±0.0   0.0±0.0       0               0                0             0
+
+Milestone reach rate (%) (R50 / R75 )                       TT50 / TT75 (steps; horizon=200)
+SC O UT             100 / 100 100 / 100 100 / 100 100 / 100 24±1 / 30±1 24±2 / 29±1      27±3 / 32±2    31±4 / 39±2
+ExpoComm              0/0        95 / 95 90 / 55   80 / 60     N/A      59±20 / 81±24 100±44 / 182±14 101±21 / 160±23
+ExpoComm-Static       0/0         0/0    60 / 60    10 / 0     N/A          N/A         85±7 / 153±20      N/A
+IDQN                  0/0         0/0     0/0        0/0       N/A          N/A             N/A            N/A
+CommFormer            0/0         0/0     0/0        0/0       N/A          N/A             N/A            N/A
+
+
+Table 1: MAgent Battle results across scales (20 evaluation seeds). We report win rate, elimina-
+tion rate, milestone reach rates R50 /R75 , and decisiveness via TT50 /TT75 .
+
+populations (81v81 and 100v100), where SC O UT converges smoothly and quickly compared to
+the baselines. At the other end of the spectrum (20v20), SC O UT still learns reliably and signif-
+icantly outperforms the baselines, while E XPO C OMM is consistently poor and shows no sustained
+learning progress. Across scales, the static-topology variant underperforms its adaptive counter-
+part, suggesting that fixed neighborhoods are overly restrictive in dynamic combat where effective
+coordination partners shift over time. (2) SC O UT converts wins into decisive elimination more
+consistently and more quickly. At larger N , ExpoComm baselines can achieve high win rate,
+but they often leave substantial opponent mass and fail to reach 75% elimination within the hori-
+zon; baseline milestone reach rates degrade with scale, indicating that many winning episodes do
+not consistently translate advantage into high-elimination outcomes. Even when milestones are
+reached, SC O UT attains them substantially faster (Table 1), consistent with its smoother and more
+stable learning dynamics (Figure 2). Notably, it is also the only method with R50 =R75 =100% at
+every scale, confirming consistently decisive elimination rather than occasional fast wins.
+
+5.3   Ablations on Pursuit
+
+Setup and claim under test. We use P URSUIT to isolate which ingredients of SC O UT drive
+scalable multi-agent coordination in cooperative capture. All methods are trained directly at each
+target scale for 4M steps.
+
+Variants and baseline. We compare the full method against targeted removals and a scalable-
+communication baseline:
+
+                                                            10
+Method                20P-8E 40P-16E 60P-24E 80P-32E 100P-40E 20P-8E 40P-16E 60P-24E 80P-32E 100P-40E
+
+Catch rate (Catch%)                                              Completion rate (Done%)
+SC O UT               94±10   93±8    89±5    90±6      88±5       70        50        0   5         0
+w/o counterfactual    72±21   18±20   28±27   29±13     58±26      20         0        0   0         0
+w/o grouping          57±18   10±9    14±6    37±10     41±10       0         0        0   0         0
+ExpoComm (Peer-n=7)   86±14   58±14   62±12   72±13     69±10      40         0        0   0         0
+
+
+Method                         20P-8E         40P-16E           60P-24E         80P-32E        100P-40E
+
+TT50 (steps; horizon=500) (R50 % in parentheses)
+SC O UT                 74±78 (100) 143±52 (100) 72±19 (100) 98±38 (100) 70±18 (100)
+w/o counterfactual     173±149 (90)    N/A (15)   N/A (20)     N/A (5)   173±86 (55)
+w/o grouping           212±184 (80)     N/A (0)    N/A (0)    N/A (15)    N/A (20)
+ExpoComm (Peer-n=7) 125±73 (100) 191±114 (80) 307±80 (85) 184±93 (100) 137±66 (95)
+
+TT75 (steps; horizon=500) (R75 % in parentheses)
+SC O UT                 138±82 (95) 227±65 (95) 139±64 (100) 212±79 (100) 149±41 (100)
+w/o counterfactual     214±136 (65)     N/A (0)   N/A (15)     N/A (0)      N/A (35)
+w/o grouping             N/A (30)       N/A (0)   N/A (0)      N/A (0)       N/A (0)
+ExpoComm (Peer-n=7) 234±114 (80)       N/A (15)   N/A (20)     N/A (40)    425±59 (50)
+
+Table 2: Pursuit ablations across scales (20 evaluation seeds; horizon=500). We report Catch%,
+Done%, and milestone times TT50 /TT75 . For milestone rows, each entry is shown as TTk (Rk ),
+where Rk is the % of episodes reaching the k% capture milestone.
+
+   (i) SC O UT: learned grouping + group-aware critic + counterfactual communication advantages.
+  (ii) w/o counterfactual: removes the counterfactual decomposition for communication decisions
+       (uses standard Generalized Advantage Estimation (Schulman et al., 2016)).
+ (iii) w/o grouping: removes learned grouping; consequently, the group-aware critic is disabled.
+ (iv) ExpoComm (Peer-n=7): same learned communication baseline as Section 5.2.
+Metrics and evaluation protocol. We evaluate each trained policy on 20 independent evaluation
+seeds per setting. We report: (i) Catch% (fraction of evaders captured); (ii) Done% (% episodes
+capturing all evaders); and (iii) decisiveness using the same milestone metrics as in Section 5.2:
+R50 /R75 (milestone reach rate) and TT50 /TT75 (time-to-milestone), but with milestones defined
+over the capture fraction rather than elimination. Furthermore, we visualize scaling trends with
+Catch% and TT50 vs. population size (Figure 3). Finally, similar to battle, we also report the in-
+group message fraction for P URSUIT in Appendix C.3 (Table 8) along with qualitative rollouts for
+100P-40E (Appendix C.2).
+
+Results and discussion. Table 2 and Figure 3 reveal two consistent patterns. (1) Full SC O UT
+scales with high capture and reliable milestone reach. Across all five scales, SC O UT maintains
+high Catch% with R50 =100%, meaning every evaluation episode reaches 50% capture within 500
+steps. It also reaches 75% capture reliably at moderate and large scales, with consistently small
+milestone times and stable across-seed error bars (Figure 3). We report Done% as full capture
+within the fixed 500-step horizon; Done% naturally decreases with scale (often to 0%) because the
+number of evaders increases while full capture requires simultaneously surrounding every remaining
+evader, making complete capture within 500 steps increasingly unlikely even when partial coordi-
+nated capture is strong. (2) Isolation experiments show that counterfactual credit and temporal
+grouping drive scalability. Removing counterfactual advantages causes an abrupt scaling fail-
+ure: beyond 20P-8E, Catch% collapses and becomes highly variable, and milestone reach drops
+sharply–R50 falls to 15-20% for 40P-16E/60P-24E and 5% for 80P-32E), making TT50 /TT75
+undefined. At 100P-40E it only partially recovers to R50 =55% while still failing to reach 75%
+reliably. Removing grouping is similarly brittle at scale: Catch% drops to 10-41% for 40P-16E
+through 100P-40E, with R50 ≤ 20% and R75 =0% throughout these larger scenarios, indicat-
+
+
+                                                  11
+Figure 3: Pursuit scaling summary. Catch% (top) and TT50 (bottom) vs. number of pursuers m
+(error bars: std over 20 evaluation seeds). In the bottom panel, we plot TT50 =500 when R50 <50%
+(Table 2 reports these cases as N/A).
+
+ing persistent failure to form effective capture coalitions. Together, these ablations support the
+conclusion that SC O UT’s counterfactual communication learning and temporal grouping are both
+necessary to sustain high capture and early milestone attainment as the population grows.
+
+6   Conclusion
+
+Scaling learned communication to large teams is difficult because sender-receiver interactions grow
+combinatorially and message-level credit becomes noisy. We presented SC O UT, an approach which
+makes communication scalable by learning a slowly-varying latent interaction structure: it resam-
+ples soft groups at a macro-step timescale, uses the resulting affinities as a differentiable prior over
+recipients, and reuses the same structure in a group-aware critic for tractable value learning at large
+N . SC O UT further introduces a counterfactual mailbox mechanism that isolates each sender’s
+marginal contribution to a recipient’s aggregated message, yielding fine-grained learning signals for
+both sending and recipient selection. Across large-population benchmarks, SC O UT trains directly
+at target scale and maintains strong, reliable coordination as N grows. In MAGENT BATTLE, it
+achieves perfect win rate with near-complete elimination and consistently early milestones, while
+state-of-the-art baselines are less decisive and less reliable. In P URSUIT, SC O UT sustains high
+capture with early milestones across scales. Ablations confirm that temporal grouping and counter-
+factual communication credit are both necessary: removing either causes sharp drops in performance
+at moderate and large scales.
+
+Limitations and future work. SC O UT adds training-time structure, in particular the macro-step
+K and number of groups M , which we currently set as fixed hyperparameters. Although one set-
+ting worked well across our benchmarks, performance can depend on how well K matches the
+interaction timescale and M matches agent behavior heterogeneity. In addition, our leave-one-out
+mailbox counterfactual provides clean marginal credit for senders under a fixed aggregation rule, but
+does not capture multi-message interaction effects. Future work includes adapting K and M online
+using signals like recipient entropy or utility drift, extending credit assignment to model message
+interactions, and evaluating SC O UT under continuous control, heterogeneity, and explicit commu-
+nication/energy budgets.
+
+
+
+
+                                                  12
+References
+Daniel S. Bernstein, Robert Givan, Neil Immerman, and Shlomo Zilberstein. The complexity of de-
+  centralized control of Markov decision processes. In 18th Conference on Uncertainty in Artificial
+  Intelligence (UAI), 2002.
+
+Austin J. Brockmeier et al. Quantifying the informativeness of similarity measurements. Journal of
+  Machine Learning Research, 18(1):1–41, 2017.
+
+Lucian Buşoniu, Robert Babuška, and Bart De Schutter. A comprehensive survey of multiagent rein-
+  forcement learning. IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications
+  and Reviews), 38(2):156–172, 2008.
+
+Kyunghyun Cho, Bart van Merriënboer, Çağlar Gülçehre, Dzmitry Bahdanau, Fethi Bougares, Hol-
+  ger Schwenk, and Yoshua Bengio. Learning phrase representations using RNN encoder–decoder
+  for statistical machine translation. In Conference on Empirical Methods in Natural Language
+  Processing (EMNLP), pp. 1724–1734, 2014.
+
+Filippos Christianos, Georgios Papoudakis, Muhammad A. Rahman, and Stefano V. Albrecht. Scal-
+   ing multi-agent reinforcement learning with selective parameter sharing. In 38th International
+   Conference on Machine Learning (ICML), pp. 1989–1998, 2021.
+
+Abhishek Das, Théophile Gervet, Joshua Romoff, Dhruv Batra, Devi Parikh, Mike Rabbat, and
+  Joelle Pineau. TarMAC: Targeted multi-agent communication. In 36th International Conference
+  on Machine Learning (ICML), pp. 1538–1546, 2019.
+
+Jakob N. Foerster, Yannis M. Assael, Nando de Freitas, and Shimon Whiteson. Learning to commu-
+  nicate with deep multi-agent reinforcement learning. In 30th International Conference on Neural
+  Information Processing Systems (NIPS), pp. 2145–2153, 2016.
+
+Jakob N. Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson.
+  Counterfactual multi-agent policy gradients. In 32nd AAAI Conference on Artificial Intelligence
+  and Thirtieth Innovative Applications of Artificial Intelligence Conference and Eighth AAAI Sym-
+  posium on Educational Advances in Artificial Intelligence, 2018.
+
+Matthias Gerstgrasser, Tom Danino, and Sarah Keren. Selectively sharing experiences improves
+ multi-agent reinforcement learning. In 37th International Conference on Neural Information
+ Processing Systems (NIPS), 2023.
+
+Evan Greensmith, Peter L Bartlett, and Jonathan Baxter. Variance reduction techniques for gradient
+  estimates in reinforcement learning. Journal of Machine Learning Research, 5:1471–1530, 2004.
+
+Pablo Hernandez-Leal, Bilal Kartal, and Matthew E. Taylor. A survey and critique of multiagent
+  deep reinforcement learning. Autonomous Agents and Multi-Agent Systems, 33(6):750–797, 2019.
+
+Shengchao Hu, Li Shen, Ya Zhang, and Dacheng Tao. Learning multi-agent communication from
+  graph modeling perspective. In 12th International Conference on Learning Representations
+  (ICLR), 2024.
+
+Eric Jang, Shixiang Gu, and Ben Poole. Categorical reparameterization with Gumbel-softmax. In
+  5th International Conference on Learning Representations (ICLR), 2017.
+
+Jiechuan Jiang and Zongqing Lu. Learning attentional communication for multi-agent coopera-
+   tion. In 32nd International Conference on Neural Information Processing Systems (NIPS), pp.
+   7265–7275, 2018.
+
+Daewoo Kim, Sangwoo Moon, David Hostallero, Wan Ju Kang, Taeyoung Lee, Kyunghwan Son,
+  and Yung Yi. Learning to schedule communication in multi-agent reinforcement learning. In 7th
+  International Conference on Learning Representations (ICLR), 2019.
+
+
+                                                13
+Sheng Li, Jayesh K. Gupta, Peter Morales, Ross Allen, and Mykel J. Kochenderfer. Deep implicit
+  coordination graphs for multi-agent reinforcement learning. In 20th International Conference on
+  Autonomous Agents and Multiagent Systems (AAMAS), pp. 764–772, 2021.
+Xinran Li, Xiaolu Wang, Chenjia Bai, and Jun Zhang. Exponential topology-enabled scalable com-
+  munication in multi-agent reinforcement learning. In 13th International Conference on Learning
+  Representations (ICLR), 2025.
+Timothy P. Lillicrap, Jonathan J. Hunt, Alexander Pritzel, Nicolas Heess, Tom Erez, Yuval Tassa,
+  David Silver, and Daan Wierstra. Continuous control with deep reinforcement learning. In 4th
+  International Conference on Learning Represenations (ICLR), 2016.
+Michael L. Littman. Markov games as a framework for multi-agent reinforcement learning. In 11th
+ International Conference on Machine Learning (ICML), 1994.
+Yong Liu, Weixun Wang, Yujing Hu, Jianye Hao, Xingguo Chen, and Yang Gao. Multi-agent game
+  abstraction via graph attention neural network. In 34th AAAI Conference on Artificial Intelligence,
+  pp. 7211–7218, 2020.
+Ryan Lowe, Yi Wu, Aviv Tamar, Jean Harb, Pieter Abbeel, and Igor Mordatch. Multi-agent actor-
+  critic for mixed cooperative-competitive environments. In 31st International Conference on Neu-
+  ral Information Processing Systems (NIPS), pp. 6382–6393, 2017.
+Chris J. Maddison, Andriy Mnih, and Yee Whye Teh. The concrete distribution: A continuous relax-
+  ation of discrete random variables. In 5th International Conference on Learning Representations
+  (ICLR), 2017.
+Volodymyr Mnih et al. Human-level control through deep reinforcement learning. Nature, 518
+  (7540):529–533, 2015.
+Yaru Niu, Rohan R Paleja, and Matthew C Gombolay. Multi-agent graph-attention communication
+  and teaming. In 20th International Conference on Autonomous Agents and MultiAgent Systems
+  (AAMAS), pp. 964–973, 2021.
+Boris T. Polyak and Anatoli B. Juditsky. Acceleration of stochastic approximation by averaging.
+  SIAM Journal on Control and Optimization, 30(4):838–855, 1992.
+Tabish Rashid, Mikayel Samvelyan, Christian Schroeder De Witt, Gregory Farquhar, Jakob Foerster,
+  and Shimon Whiteson. Monotonic value function factorisation for deep multi-agent reinforcement
+  learning. Journal of Machine Learning Research, 21(178):1–51, 2020.
+Mikayel Samvelyan, Tabish Rashid, Christian Schroeder de Witt, Gregory Farquhar, Nantas
+ Nardelli, Tim G. J. Rudner, Chia-Man Hung, Philip H. S. Torr, Jakob Foerster, and Shimon White-
+ son. The starcraft multi-agent challenge. In 18th International Conference on Autonomous Agents
+ and MultiAgent Systems (AAMAS), pp. 2186–2188, 2019.
+John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel. High-
+  dimensional continuous control using generalized advantage estimation. In 4th International
+  Conference on Learning Representations (ICLR), 2016.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+  optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+Amanpreet Singh, Tushar Jain, and Sainbayar Sukhbaatar. Learning when to communicate at scale
+ in multiagent cooperative and competitive tasks. In 7th International Conference on Learning
+ Representations (ICLR), 2019.
+Kyunghwan Son, Daewoo Kim, Wonseok Kang, David Hostallero, and Yung Yi. QTRAN: Learn-
+  ing to factorize with transformation for cooperative multi-agent reinforcement learning. In 36th
+  International Conference on Machine Learning (ICML), pp. 5887–5896, 2019.
+
+                                                 14
+Sainbayar Sukhbaatar, Arthur Szlam, and Rob Fergus. Learning multiagent communication with
+  backpropagation. In 30th International Conference on Neural Information Processing Systems
+  (NIPS), pp. 2252–2260, 2016.
+
+Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi, Max
+  Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z. Leibo, Karl Tuyls, and Thore Graepel. Value-
+  decomposition networks for cooperative multi-agent learning based on team reward. In 17th
+  International Conference on Autonomous Agents and MultiAgent Systems (AAMAS), 2018.
+
+Richard S Sutton. Learning to predict by the methods of temporal differences. Machine learning, 3
+  (1):9–44, 1988.
+Jordan Terry, Benjamin Black, Nathaniel Grammel, Mario Jayakumar, Ananth Hari, Ryan Sullivan,
+  Luis S Santos, Clemens Dieffendahl, Caroline Horsch, Rodrigo Perez-Vicente, et al. Petting-
+  zoo: Gym for multi-agent reinforcement learning. In 35th International Conference on Neural
+  Information Processing Systems (NIPS), pp. 15032–15043, 2021.
+Justin K Terry, Nathaniel Grammel, Sanghyun Son, Benjamin Black, and Aakriti Agrawal.
+  Revisiting parameter sharing in multi-agent deep reinforcement learning. arXiv preprint
+  arXiv:2005.13625, 2020.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez,
+  Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. In 31st International Confer-
+  ence on Neural Information Processing Systems, 2017.
+Jianhao Wang, Zhizhou Ren, Terry Liu, Yang Yu, and Chongjie Zhang. QPLEX: Duplex dueling
+   multi-agent Q-learning. In 9th International Conference on Learning Representations (ICLR),
+   2021.
+
+Yuanfei Wang, Fangwei Zhong, Jing Xu, and Yizhou Wang. ToM2C: Target-oriented multi-agent
+  communication and cooperation with theory of mind. In 10th International Conference on Learn-
+  ing Representations (ICLR), 2022.
+Ronald J. Williams. Simple statistical gradient-following algorithms for connectionist reinforcement
+  learning. Machine Learning, 8(3–4):229–256, 1992.
+
+Yaodong Yang, Rui Luo, Minne Li, Ming Zhou, Weinan Zhang, and Jun Wang. Mean field multi-
+  agent reinforcement learning. In 35th International Conference on Machine Learning (ICML),
+  pp. 5571–5580, 2018.
+Rex Ying, Jiaxuan You, Christopher Morris, Xiang Ren, William L. Hamilton, and Jure Leskovec.
+  Hierarchical graph representation learning with differentiable pooling. In 32nd International
+  Conference on Neural Information Processing Systems (NIPS), pp. 4805–4815, 2018.
+Chao Yu, Akash Velu, Eugene Vinitsky, Jiaxuan Gao, Yu Wang, Alexandre Bayen, and Yi Wu.
+  The surprising effectiveness of PPO in cooperative, multi-agent games. In 36th International
+  Conference on Neural Information Processing Systems (NIPS), 2022.
+
+Lianmin Zheng, Jiacheng Yang, Han Cai, Ming Zhou, Weinan Zhang, Jun Wang, and Yong Yu.
+  Magent: A many-agent reinforcement learning platform for artificial collective intelligence. In
+  32nd AAAI Conference on Artificial Intelligence, 2018.
+
+
+
+
+                                                15
+                           Supplementary Materials
+                The following content was not necessarily subject to peer review.
+
+
+
+A     Environment Details
+
+A.1   MAgent Battle (battle_v3)
+
+Map size to population scale. In MAGENT BATTLE, the population scale is determined by the
+(square) map size. For a map of size S × S, the environment spawns N agents per team as listed in
+Table 3 (e.g., S=40 ⇒ 64 vs 64).
+
+                                S (map size)     25     40   45    50
+                               N (agents/team)   20     64   81   100
+
+              Table 3: Battle scaling: map size S to population N (agents per team).
+
+
+Agent dynamics and interaction radii. Each agent occupies one grid cell (1×1), has health hp =
+10, health recovery rate step_recover = 0.1, speed speed = 2, view radius view_range =
+CircleRange(3), attack radius attack_range = CircleRange(1.5), and attack damage
+damage = 2.
+
+Rewards. The environment provides the following default shaping terms: step reward
+step_reward = −0.005, death penalty dead_penalty = −0.1, attack penalty
+attack_penalty = −0.1, and an additional reward of attack_opponent_reward = 0.2
+for each successful attack event. In addition, agents receive a kill reward kill_reward = 5
+upon eliminating an opponent. Episodes run until all blue agents are killed or for at most
+max_cycles = 200 steps.
+
+Controlled team and opponent policy. In all Battle experiments, we control the red team, while
+the blue team acts as an opponent using a pretrained IDQN policy, following the same evaluation
+protocol used by Li et al. (2025).
+
+Spawn layout. At reset, each team is initialized as a dense square formation on opposite sides of
+the map. Let S be the map√size. The environment sets init_num = 0.04 S 2 and forms a square
+of side length side = 2⌊ init_num⌋, placing agents on an every-other-cell lattice (stride 2) to
+avoid overlap. The two formations are separated by a horizontal gap of gap = 3 cells centered
+around the midline.
+
+Reference visualization.   Figure 4 shows a representative 64 vs 64 configuration.
+
+A.2   Pursuit (pursuit_v3)
+
+Scenario sizes. In P URSUIT, the world is a square grid of size S × S, where S depends on the
+population scale (Table 4).
+
+             Scenario        20P–8E    40P–16E        60P–24E     80P–32E   100P–40E
+             Map size S        40         45            50          55         60
+
+               Table 4: Pursuit scaling: pursuers/evaders (P/E) to map size S × S.
+
+
+
+                                                 16
+Figure 4: Battle reference map at 64 vs 64 (map size 40 × 40). Red squares denote controlled agents
+and blue squares denote opponent agents.
+
+
+State and observations. The environment maintains a 3-channel grid state consisting of: (i) static
+obstacles/walls, (ii) pursuer occupancy, and (iii) evader occupancy. Each pursuer observes a local
+R × R patch centered on itself with obs_range = R (default R = 7), returned as a 3-channel
+tensor. Pursuers act in a discrete action space corresponding to primitive grid movements and a tag
+action.
+
+Catching rule (surround). We use surround = True throughout. An evader at location (x, y)
+is removed when pursuers occupy all open 4-neighborhood cells (up/down/left/right) around (x, y),
+and tag the evader. The number of required surrounding cells accounts for map boundaries and
+obstacles (i.e., fewer than 4 are required if some neighboring cells are blocked or out-of-bounds).
+Each pursuer that participates in a surround event is credited as a catcher.
+
+Rewards and termination. The default reward parameters are catch_reward = 5.0 (awarded
+to catchers when an evader is removed), tag_reward = 0.0, and urgency_reward = 0.0. So,
+this is a very sparse reward environment. An episode terminates when all evaders are removed or
+upon reaching the time limit max_cycles = 500 steps.
+
+Controlled team and opponent policy. In all P URSUIT experiments, we control the pursuers,
+while the evaders move randomly around the map.
+
+Initialization. At reset, pursuers and evaders are randomly initialized within a (possibly con-
+strained) window of the map. In our runs we use constraint_window = 1.0, which corre-
+sponds to sampling across the full map.
+
+Reference visualization.   Figure 5 shows a representative 20P–8E configuration.
+
+
+B   Hyperparameters and Architecture
+
+This section provides a reproducibility-oriented summary of (i) model architectures, (ii) PPO opti-
+mization settings, and (iii) communication- and grouping-specific hyperparameters. Unless stated
+otherwise, the same settings are used across both benchmarks.
+
+                                                17
+Figure 5: Pursuit reference map at 20P–8E (map size 40 × 40). Red circles denote pursuers and blue
+circles denote evaders. Orange translucent squares indicate local observation windows for pursuers.
+
+
+B.1   Model architecture
+
+Actor. Each agent uses a recurrent policy with GRU hidden size h = 64. At each environment
+step, the agent observation is first embedded with a linear layer and ReLU, then processed by a
+GRU:
+                               Linear+ReLU          GRU(h,h)
+                         obst −−−−−−−→ et ∈ Rh −−−−−−→ ut ∈ Rh .
+From ut , the actor outputs three heads: (i) environment action logits, (ii) a binary “send” decision
+logits, and (iii) recipient-selection logits over the N candidate recipients.
+
+Descriptor network. A descriptor network encodes per-agent inputs into: (i) a grouping descrip-
+tor zgrp ∈ R64 used for soft group assignments, and (ii) a message feature zmsg ∈ R96 used as the
+content representation for communication and for the communication critic. Descriptor MLPs apply
+LayerNorm at the output, and observations use running normalization.
+
+Mailbox aggregation (parameter-free attention). Incoming messages are aggregated with a
+single-head dot-product attention in message-feature
+                                       √             space: for each recipient, attention weights are
+a softmax over senders (scaled by 1/ d), and the mailbox is the weighted sum of sender message
+vectors. All agents are eligible recipients.
+
+Group-aware critic. A group critic maps the global state to per-group values using a 2-layer MLP
+(ReLU, no layer normalization),
+                                  Vgrp : s → Rh → Rh → RM ,
+and produces per-agent values via the (soft) group assignment matrix Pτ .
+
+Communication critic. We use two small MLPs (ReLU, no layer normalization): (i) a value
+network V (·) that takes global state concatenated with an agent feature vector, and (ii) an edge-
+value network Q(i → j) that takes global state concatenated with sender and recipient features. The
+agent feature includes zmsg , the incoming mailbox embedding, the send bit, and the M -dimensional
+soft group assignment.
+
+B.2   Optimization and training
+
+PPO. We use PPO with rollout length 2048 environment steps per update, 8 update epochs, mini-
+batch size 4096, and clipping parameter ε = 0.2. Discounting uses γ = 0.99 and GAE uses
+
+
+                                                 18
+λ = 0.95. The value loss coefficient is 0.5 and the maximum gradient norm is 1.0. We use Adam
+with learning rate 3 × 10−4 . Entropy regularization coefficients are: environment action 0.02, send
+decision 0.01, and recipient selection 0.01.
+
+Grouping objective and schedules. Soft group assignments use a Gumbel–Softmax temperature
+schedule linearly annealed from τ = 10 to τ = 0.5 over training. Assignments are prototype-based
+using cosine similarity to M learnable prototypes with logit scale 3.0. Auxiliary grouping losses
+use: balance weight 0.1, row-entropy weight 0.01, and an edge-utility weight linearly scheduled
+from 0 to 1 over training.
+
+Macro-step. Group assignments and the corresponding group-induced recipient prior are recom-
+puted every K = 10 environment steps.
+For convenience, Table 5 summarizes the shared architecture and training hyperparameters described
+above.
+
+  Category                                            Setting
+  Network
+  Actor hidden size h                                 64 (GRU)
+  Descriptor dims                                     zgrp : 64, zmsg : 96
+  Group critic                                        MLP: s → 64 → 64 → M (ReLU)
+  Comm critic                                         MLPs: (s||·) → 64 → 64 → 1 (ReLU)
+  Normalization                                       Running obs norm; LayerNorm at descriptor  √ outputs
+  Mailbox aggregation                                 Single-head dot-product attention, scale 1/ d
+  PPO
+  Rollout length                                      2048
+  Minibatch size                                      4096
+  Epochs per update                                   8
+  Clip ε                                              0.2
+  γ, GAE λ                                            0.99, 0.95
+  Value loss coeff.                                   0.5
+  Entropy coeff. (action / send / recv)               0.02 / 0.01 / 0.01
+  Optimizer                                           Adam, lr 3 × 10−4
+  Max grad norm                                       1.0
+  Grouping / comm
+  Macro-step K                                        10
+  Gumbel–Softmax τ                                    Linear 10 → 0.5
+  Logit scale                                         3.0
+  Aux losses (balance / row-entropy / edge-utility)   0.1 / 0.01 / Linear 0 → 1
+  Mailbox latency                                     One step (t → t+1)
+
+                   Table 5: Shared hyperparameters used across Battle and Pursuit.
+
+
+B.3   Benchmark-specific settings
+
+Number of groups M .        We set the number of groups using simple scale-dependent heuristics:
+                                         j√ k                         
+                                                                       E
+                           Battle: M =     N ,       Pursuit: M =          ,
+                                                                       2
+
+where N is the number of agents per team in Battle and E is the number of evaders in Pursuit.
+Tables 6 and 7 list M for the population scales reported in the main paper. The choice of these
+scale-dependent heuristics is further justified through a sensitivity study in Appendix D.
+
+
+                                                      19
+                                     Scenario         # groups M
+                                     20v20                 4
+                                     64v64                 8
+                                     81v81                 9
+                                     100v100              10
+
+                         Table 6: Battle: number of groups for each scale.
+
+
+                                     Scenario         # groups M
+                                     20P-8E                4
+                                     40P-16E               8
+                                     60P-24E              12
+                                     80P-32E              16
+                                     100P-40E             20
+
+                         Table 7: Pursuit: number of groups for each scale.
+
+
+C     Additional Results
+
+We visualize rollout snapshots from a single illustrative evaluation episode of SC O UT at the
+headline scale for each benchmark: 100v100 Battle (map size 50, pretrained opponents) and
+100P–40E Pursuit. For each episode, we report four frames at progression timesteps t ∈
+{0, ⌊T /4⌋, ⌊T /2⌋, T }, where T is the final timestep of the shown episode. We also report a post-hoc
+in-group message fraction from the same setting to support the claim that the learned interaction
+structure concentrates communication within groups.
+
+
+C.1   Battle (100v100)
+
+
+
+
+Figure 6: BATTLE 100v100: SC O UT rollout at progression t = 0, ⌊T /4⌋, ⌊T /2⌋, T (this episode:
+0, 15, 30, 60 with T = 60). Red agents are controlled by SC O UT; blue agents are the pretrained
+IDQN opponent.
+
+
+
+Key events (Figure 6). At t = 0, both teams begin in symmetric spawn regions. As contact
+occurs, SC O UT’s recipient selection becomes structured: messages are preferentially routed within
+the same (soft) group, which typically corresponds to nearby agents and locally coordinated attacks.
+By mid-episode, the controlled red agents form multiple coherent sub-engagements, rather than a
+single diffuse front. By the final frame, remaining red agents tend to appear in spatially coherent
+pockets, consistent with localized, group-driven coordination.
+
+                                                 20
+Figure 7: P URSUIT 100P-40E: SC O UT rollout at progression t = 0, ⌊T /4⌋, ⌊T /2⌋, T (this
+episode: 0, 35, 70, 105 with T = 135). Red circles are pursuers; blue circles are evaders. White
+cells are obstacles/walls; black cells are free space.
+
+
+Metric                     20v20       64v64      81v81      100v100      20P-8E     40P-16E     60P-24E     80P-32E    100P-40E
+
+BATTLE                                                                 P URSUIT
+In-group frac.         0.343±0.046 0.257±0.009 0.488±0.032 0.406±0.010 0.297±0.024 0.319±0.010 0.376±0.056 0.238±0.029 0.397±0.003
+Random baseline (1/M )    0.250       0.125       0.111       0.100       0.250       0.125       0.083       0.062       0.050
+# groups (M )               4           8           9          10           4           8           12          16          20
+
+
+Table 8: In-group message fraction across scales (10 evaluation seeds). We report mean ± std of
+the in-group message fraction (Eq. above) computed over realized sender–recipient message edges.
+The random baseline corresponds to uniformly random group membership, which yields expected
+in-group fraction 1/M .
+
+
+C.2      Pursuit (100P–40E)
+
+Key events (Figure 7). Initially, pursuers spread across the map and begin forming local coali-
+tions around nearby evaders. As the episode progresses, subteams emerge that repeatedly execute
+surround-and-capture behaviors in different regions of the map (visible as clusters of pursuers tight-
+ening around evaders). This behavior is consistent with a group-induced recipient bias: communica-
+tion emphasizes coordination among agents that are already acting as a local capture unit, reducing
+unnecessary cross-map broadcast.
+
+
+C.3      Effect of grouping: in-group message fraction
+
+To quantify whether communication aligns with the learned interaction structure, we compute the
+in-group message fraction: the fraction of realized sender–recipient message edges (i → j) for
+which sender and recipient belong to the same group. Concretely, at each macro-step we obtain
+soft assignments Pτ ∈ [0, 1]N ×M and define a hard group label ĝ(i) = arg maxm Pτ (i, m). Let E
+denote the set of all realized sender-recipient message edges during an episode. We report
+
+                                                           1      X
+                                   InGroupFrac =                          I[ĝ(i) = ĝ(j)] .
+                                                          |E|
+                                                                (i→j)∈E
+
+
+We average this metric over 10 evaluation seeds. This is a diagnostic metric used only for analysis
+and is not itself optimized as a training objective. Table 8 reports the in-group fraction across all
+scales, together with the random baseline 1/M .
+Across all reported scales, the in-group message fraction is well above the 1/M baseline, indicat-
+ing that recipient selection is strongly aligned with the learned group structure. This supports the
+qualitative rollouts in Figure 6 and Figure 7 and is consistent with the role of grouping in SC O UT:
+it induces a slowly-varying interaction structure during training that reduces diffuse broadcast and
+promotes localized coordination.
+
+                                                                21
+D     Sensitivity to Number of Groups and Macro-Step Length
+
+SC O UT introduces two environment-facing hyperparameters that control the granularity and tem-
+poral persistence of the learned interaction structure: the number of groups M and the macro-step
+length K. This section evaluates how sensitive performance is to (M, K), and whether the choice
+of K=10 and scale-dependent M , used in the main experiments, lies in a stable high-performing
+region.
+
+Settings. We perform controlled sweeps on two representative, computationally manageable
+scales: P URSUIT 40P-16E and BATTLE 64v64. These settings are large enough to exhibit non-
+trivial coordination dynamics, while being substantially cheaper computationally than the largest
+stress-test cases. Even at these scales, each 4×4 sweep required approximately 4 days per bench-
+mark, making analogous sweeps at larger scales prohibitively expensive.
+
+D.1   Experimental setup
+
+Grid over (M, K).     For each benchmark, we evaluate a 4 × 4 grid:
+
+                           M ∈ {4, 6, 8, 12},        K ∈ {5, 10, 15, 20}.
+
+The grid includes the default configuration used in the√ main paper, (M =8, K=10), which cor-
+responds to our scale rules at 64v64 Battle (M = ⌊ 64⌋ = 8) and 40P-16E Pursuit (M =
+⌊16/2⌋ = 8).
+
+Training protocol and metric. All runs use identical hyperparameters except for (M, K) (Ap-
+pendix B) and are trained for 2000 iterations. We report the final average episode return for each
+configuration. Figures 8 and 9 visualize the resulting performance surfaces.
+
+
+
+
+Figure 8: Sensitivity of SC O UT to (M, K) on BATTLE 64v64. Left: Interpolated contour plot.
+Right: Heatmap with exact returns for each evaluated (M, K) pair.
+
+
+
+D.2   Results and interpretation
+
+Battle 64v64. Figure 8 shows a sharp dependence on M . Very small M performs poorly across
+K, with M =4 yielding the lowest returns for all K. In contrast, intermediate group counts are
+substantially stronger: the best configuration is (M =8, K=10), with nearby settings remaining
+competitive. For large M , average reward remains positive but is typically below the best region.
+This pattern is consistent with the intuition that Battle benefits from meaningful group structure,
+while still retaining enough within-group mass to coordinate local engagements.
+
+                                                22
+Figure 9: Sensitivity of SC O UT to (M, K) on P URSUIT 40P-16E. Left: Interpolated contour plot
+for the coarse trend (higher is better). Right: Heatmap with exact returns for each evaluated (M, K)
+pair.
+
+
+Pursuit 40P-16E. Figure 9 shows a clear best-performing configuration at (M =8, K=10). Fur-
+themore, several settings also achieve competitive return: (M =6, K=15) at 10.18, (M =4, K=10)
+at 10.13, and (M =12, K=20) at 10.08). Overall, the sweep supports the default (8, 10) while indi-
+cating that SC O UT is less sensitive to the choice of (M, K)in P URSUIT as compared to BATTLE,
+which showed a more structured and sharper dependence on M .
+
+Takeaway. Across both benchmarks, the sweeps place the best-performing region at or near the
+default choice (M =8, K=10) used in the main experiments. The observed trends align with the
+roles of the two hyperparameters: M controls interaction granularity—too small can reduce selec-
+tivity and induce broadcast-like communication; too large can fragment coalitions. On the other
+hand, K controls persistence—too small can introduce unnecessary churn; too large can make the
+interaction structure stale in dynamic settings. Together, these results provide additional justification
+for using K=10 with scale-dependent M in the main paper without per-scale tuning.
+
+
+
+
+                                                   23
+
